@@ -13,6 +13,7 @@ interface SettingsData {
   anthropicApiKey: string;
   claudeModel: string;
   googlePlacesApiKey: string;
+  apifyToken: string;
   defaultPipelineId: string;
   metaAccessToken: string;
   metaAdAccountId: string;
@@ -21,7 +22,7 @@ interface SettingsData {
   metaGraphVersion: string;
   callGoal: string;
   profile: Record<string, string>;
-  has: { ghl: boolean; claude: boolean; places: boolean; meta: boolean };
+  has: { ghl: boolean; claude: boolean; places: boolean; meta: boolean; apify?: boolean };
   envLocked: string[];
 }
 
@@ -147,6 +148,7 @@ export function Settings() {
         anthropicApiKey: form.anthropicApiKey,
         claudeModel: form.claudeModel,
         googlePlacesApiKey: form.googlePlacesApiKey,
+        apifyToken: form.apifyToken,
         defaultPipelineId: form.defaultPipelineId,
         metaAccessToken: form.metaAccessToken,
         metaAdAccountId: form.metaAdAccountId,
@@ -167,7 +169,7 @@ export function Settings() {
     }
   };
 
-  const test = async (service: "ghl" | "claude" | "places" | "meta") => {
+  const test = async (service: "ghl" | "claude" | "places" | "meta" | "apify") => {
     setTesting(service);
     try {
       const r = await api.post<{ ok: boolean; message: string; adAccounts?: MetaAccount[]; pages?: { id: string; name: string }[] }>(`/api/settings/test/${service}`, form);
@@ -202,6 +204,7 @@ export function Settings() {
           <a href="#ghl">GoHighLevel</a>
           <a href="#claude">Claude</a>
           <a href="#meta">Meta Ads</a>
+          <a href="#leads">Lead finder</a>
           <a href="#places">Google Places</a>
           <a href="#appearance">Appearance</a>
           <a href="#profile">Business profile</a>
@@ -309,6 +312,27 @@ export function Settings() {
               <div className="row wrap">
                 <button className="btn" onClick={() => test("claude")} disabled={testing === "claude" || !form.anthropicApiKey}>{testing === "claude" ? "Testing…" : "Test & save"}</button>
                 <Result r={tests.claude ?? null} />
+              </div>
+            </div>
+          </Card>
+
+          <div id="leads" />
+          <Card title="Lead finder (Apify)" sub="Free: Google Maps leads with phones, websites and emails" right={<span className={`badge ${form.has.apify ? "good" : ""}`}>{form.has.apify ? "Connected" : "Not connected"}</span>}>
+            <div className="stack">
+              <div className="small muted">
+                Powers <b>Find clients</b>. Apify's Free plan includes $5 of usage every month, about 1,250 Google Maps leads, and it can't charge a card: when the credit runs out, searches stop until next month. Bloom AI checks what's left before every search, and finds emails on each lead's website for free.
+              </div>
+              <ol className="steps">
+                <li>Create a free account at <b>apify.com</b> (no card needed).</li>
+                <li>In Apify Console, go to <b>Settings → API &amp; Integrations</b>, and under <b>Personal API tokens</b> select <b>Create a new token</b>.</li>
+                <li>Copy the token, paste it here, and click <b>Test &amp; save</b>.</li>
+              </ol>
+              <Field label="Apify API token">
+                <Lockable locked={locked("apifyToken")}><input className="input mono" type="password" autoComplete="off" value={form.apifyToken ?? ""} onChange={set("apifyToken")} placeholder="apify_api_…" disabled={locked("apifyToken")} /></Lockable>
+              </Field>
+              <div className="row wrap">
+                <button className="btn" onClick={() => test("apify")} disabled={testing === "apify" || !form.apifyToken}>{testing === "apify" ? "Testing…" : "Test & save"}</button>
+                <Result r={tests.apify ?? null} />
               </div>
             </div>
           </Card>

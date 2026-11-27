@@ -26,6 +26,7 @@ export interface Settings {
   anthropicApiKey: string;
   claudeModel: string;
   googlePlacesApiKey: string;
+  apifyToken: string; // Apify (free plan: $5 of usage a month) runs the Google Maps lead finder
   defaultPipelineId: string;
   metaAccessToken: string;
   metaAdAccountId: string; // act_123…
@@ -42,6 +43,7 @@ const defaults: Settings = {
   anthropicApiKey: "",
   claudeModel: "claude-opus-5-5",
   googlePlacesApiKey: "",
+  apifyToken: "",
   defaultPipelineId: "",
   metaAccessToken: "",
   metaAdAccountId: "",
@@ -68,6 +70,7 @@ const ENV_MAP: Partial<Record<keyof Settings, string>> = {
   anthropicApiKey: "ANTHROPIC_API_KEY",
   claudeModel: "CLAUDE_MODEL",
   googlePlacesApiKey: "GOOGLE_PLACES_API_KEY",
+  apifyToken: "APIFY_TOKEN",
   metaAccessToken: "META_ACCESS_TOKEN",
   metaAdAccountId: "META_AD_ACCOUNT_ID",
   metaPageId: "META_PAGE_ID",
@@ -94,7 +97,7 @@ export function envLocked(): (keyof Settings)[] {
     .map(([k]) => k);
 }
 
-const SECRET_KEYS = ["ghlApiKey", "anthropicApiKey", "googlePlacesApiKey", "metaAccessToken"] as const;
+const SECRET_KEYS = ["ghlApiKey", "anthropicApiKey", "googlePlacesApiKey", "apifyToken", "metaAccessToken"] as const;
 
 function mask(v: string): string {
   if (!v) return "";
@@ -109,11 +112,13 @@ export function publicSettings() {
     ghlApiKey: mask(s.ghlApiKey),
     anthropicApiKey: mask(s.anthropicApiKey),
     googlePlacesApiKey: mask(s.googlePlacesApiKey),
+    apifyToken: mask(s.apifyToken),
     metaAccessToken: mask(s.metaAccessToken),
     has: {
       ghl: Boolean(s.ghlApiKey && s.ghlLocationId),
       claude: Boolean(s.anthropicApiKey),
       places: Boolean(s.googlePlacesApiKey),
+      apify: Boolean(s.apifyToken),
       meta: Boolean(s.metaAccessToken && s.metaAdAccountId),
     },
     envLocked: envLocked(),

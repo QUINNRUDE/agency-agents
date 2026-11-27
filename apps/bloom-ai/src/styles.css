@@ -767,3 +767,10 @@ ol.steps { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 13px;
 @media (max-width: 760px) {
   .builder .grid-2 { grid-template-columns: 1fr; }
 }
+
+/* lead finder */
+.credit-meter, .job-progress { display: flex; gap: 12px; align-items: center; padding: 12px 14px; }
+.job-progress { border-color: var(--accent); background: var(--accent-soft); }
+.job-progress > svg { width: 18px; height: 18px; color: var(--accent); flex: none; }
+.meter { height: 6px; border-radius: 999px; background: var(--surface-sunk); overflow: hidden; margin: 6px 0 4px; }
+.meter > span { display: block; height: 100%; border-radius: inherit; background: var(--grad); transition: width 0.4s ease; }

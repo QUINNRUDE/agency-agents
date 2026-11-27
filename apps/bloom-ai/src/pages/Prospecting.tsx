@@ -1,17 +1,36 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { CheckCircle2, ExternalLink, Globe, Loader2, MapPin, Phone, Plus, ScanSearch, Search, Sparkles, Star, Telescope, X, XCircle, AlertTriangle } from "lucide-react";
-import { api, type Pipeline, type Prospect } from "../lib/api.ts";
+import { CheckCircle2, Coins, ExternalLink, Globe, Loader2, Mail, MapPin, Phone, Plus, ScanSearch, Search, Share2, Sparkles, Star, Telescope, X, XCircle, AlertTriangle } from "lucide-react";
+import { api, type LeadJob, type Pipeline, type Prospect } from "../lib/api.ts";
 import { phoneDisplay, relTime } from "../lib/format.ts";
 import { AiPanel } from "../components/AiPanel.tsx";
 import { Banner, Card, Empty, Field, LoadingRows, Modal, ScoreBadge, useAsync, useToast } from "../components/ui.tsx";
 import { useApp } from "../App.tsx";
 
 const NICHES = ["Dentists", "Roofers", "Med spas", "HVAC", "Plumbers", "Chiropractors", "Law firms", "Landscapers", "Auto repair", "Real estate agents"];
+const APIFY_SIZES = [25, 50, 100, 150, 250];
+
+interface Usage {
+  connected: boolean;
+  pricePerLead: number;
+  plan?: string;
+  free?: boolean;
+  creditUsd?: number;
+  usedUsd?: number;
+  leftUsd?: number;
+  resetsAt?: string;
+  leadsLeft?: number;
+}
+
+const usd = (n: number) => `$${n.toFixed(2)}`;
+const isRunning = (j: LeadJob | null) => j?.status === "scraping" || j?.status === "finding-contacts";
 
 export function Prospecting() {
   const { status } = useApp();
   const toast = useToast();
+  const apify = Boolean(status?.has.apify);
+  const usage = useAsync(() => (apify ? api.get<Usage>("/api/lead-finder/usage") : Promise.resolve<Usage>({ connected: false, pricePerLead: 0.004 })), [apify]);
+  const [job, setJob] = useState<LeadJob | null>(null);
   const [niche, setNiche] = useState("");
   const [location, setLocation] = useState("");
   const [max, setMax] = useState(40);
@@ -28,16 +47,71 @@ export function Prospecting() {
   const saved = useAsync(() => api.get<Prospect[]>("/api/prospects"));
   const pipelines = useAsync(() => api.get<Pipeline[]>("/api/pipelines"));
 
+  useEffect(() => {
+    if (apify && !APIFY_SIZES.includes(max)) setMax(50);
+  }, [apify]);
+
+  // A search keeps running on the server if you leave the page: pick it back up.
+  useEffect(() => {
+    if (!apify) return;
+    api
+      .get<LeadJob[]>("/api/lead-jobs")
+      .then((list) => {
+        const live = list.find((j) => isRunning(j));
+        if (live) setJob(live);
+      })
+      .catch(() => undefined);
+  }, [apify]);
+
+  const running = isRunning(job);
+  useEffect(() => {
+    if (!job || !running) return;
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const r = await api.get<{ job: LeadJob; prospects: Prospect[] }>(`/api/lead-jobs/${job.id}`);
+        if (stopped) return;
+        setJob(r.job);
+        if (r.prospects.length) {
+          setResults(r.prospects);
+          setSample(false);
+        }
+        if (r.job.status === "done") {
+          toast(`Found ${r.job.found} businesses, ${r.job.emailsFound} with an email`);
+          saved.reload();
+          usage.reload();
+        } else if (r.job.status === "failed") {
+          toast(r.job.error || "The search didn't finish. Try again.", "bad");
+          usage.reload();
+        }
+      } catch {
+        /* a slow poll is retried on the next tick */
+      }
+    };
+    const t = setInterval(() => void poll(), 4000);
+    void poll();
+    return () => {
+      stopped = true;
+      clearInterval(t);
+    };
+  }, [job?.id, running]);
+
   const search = async () => {
     if (!niche.trim() || !location.trim()) return;
     setSearching(true);
     setView("results");
     setSelected(new Set());
     try {
-      const r = await api.post<{ prospects: Prospect[]; sample: boolean }>("/api/prospects/search", { niche, location, maxResults: max, minRating: minRating || undefined, onlyNoWebsite: noSite });
-      setResults(r.prospects);
-      setSample(r.sample);
-      saved.reload();
+      const r = await api.post<{ prospects: Prospect[]; sample: boolean; job?: LeadJob }>("/api/prospects/search", { niche, location, maxResults: max, minRating: minRating || undefined, onlyNoWebsite: noSite });
+      if (r.job) {
+        setJob(r.job);
+        setResults([]);
+        setSample(false);
+      } else {
+        setResults(r.prospects);
+        setSample(r.sample);
+        saved.reload();
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : "Search failed", "bad");
     } finally {
@@ -77,9 +151,12 @@ export function Prospecting() {
   };
 
   const rows = useMemo(() => {
-    const list = view === "results" ? (results ?? []) : (saved.data ?? []);
+    // Rating and "no website" filters apply to the latest search here (Apify searches return everything).
+    const list = view === "results" ? (results ?? []).filter((p) => (!minRating || p.rating === null || p.rating >= minRating) && (!noSite || !p.website)) : (saved.data ?? []);
     return [...list].sort((a, b) => Number(a.status === "dismissed") - Number(b.status === "dismissed") || b.score - a.score);
-  }, [view, results, saved.data]);
+  }, [view, results, saved.data, minRating, noSite]);
+  const u = usage.data;
+  const estimate = max * (u?.pricePerLead ?? 0.004);
 
   const counts = { results: results?.length ?? 0, saved: saved.data?.length ?? 0 };
   const allChecked = rows.length > 0 && rows.filter((r) => r.status === "new").every((r) => selected.has(r.id));
@@ -89,7 +166,7 @@ export function Prospecting() {
       <div className="page-head">
         <div>
           <h2>Find clients</h2>
-          <p>Search local businesses, audit their web presence, and push the best fits straight into GoHighLevel.</p>
+          <p>Search Google Maps for local businesses, find their phone and email, and add the best fits to your CRM.</p>
         </div>
       </div>
 
@@ -109,7 +186,7 @@ export function Prospecting() {
             <div style={{ width: 110 }}>
               <Field label="Max results">
                 <select className="select" value={max} onChange={(e) => setMax(Number(e.target.value))}>
-                  {[20, 40, 60].map((n) => <option key={n} value={n}>{n}</option>)}
+                  {(apify ? APIFY_SIZES : [20, 40, 60]).map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
               </Field>
             </div>
@@ -124,7 +201,7 @@ export function Prospecting() {
             <label className="row small" style={{ height: 34 }}>
               <input type="checkbox" checked={noSite} onChange={(e) => setNoSite(e.target.checked)} /> No website only
             </label>
-            <button className="btn primary lg" onClick={search} disabled={searching || !niche.trim() || !location.trim()}>
+            <button className="btn primary lg" onClick={search} disabled={searching || running || !niche.trim() || !location.trim()}>
               {searching ? <Loader2 className="spin" style={{ animation: "spin 0.8s linear infinite" }} /> : <Search />} Search
             </button>
           </div>
@@ -136,18 +213,50 @@ export function Prospecting() {
         </div>
       </Card>
 
-      {!status?.has.places && (
+      {apify && u?.connected && u.leftUsd !== undefined && u.creditUsd !== undefined && (
+        <div className="card credit-meter">
+          <span className="ichip grad"><Coins /></span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
+              <b className="small">Free Apify credit this month</b>
+              <span className="small num">{usd(u.leftUsd)} of {usd(u.creditUsd)} left</span>
+            </div>
+            <div className="meter" aria-hidden><span style={{ width: `${Math.max(0, Math.min(100, (u.leftUsd / Math.max(0.01, u.creditUsd)) * 100))}%` }} /></div>
+            <div className="faint small">
+              About {(u.leadsLeft ?? 0).toLocaleString("en-US")} more leads{u.resetsAt ? `, resets ${new Date(u.resetsAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}. This search: up to {max} leads, about {usd(estimate)}. Emails are found on each website for free.
+            </div>
+          </div>
+        </div>
+      )}
+      {apify && usage.error && <Banner tone="bad">Apify: {usage.error} <Link to="/settings#leads">Check the token</Link></Banner>}
+      {!apify && !status?.has.places && (
         <Banner tone="info">
           {status?.demoData === false ? (
             <>
-              <Link to="/settings#places">Add a Google Places API key</Link> to search real businesses with live phone numbers, ratings and websites. Until then, you can add clients with Clients → Import.
+              Search Google Maps for free: <Link to="/settings#leads">connect a free Apify account</Link>. That's about 1,250 real leads a month with no card needed. Until then, you can add clients with Clients → Import.
             </>
           ) : (
             <>
-              Without a Google Places key, searches return clearly-labelled sample businesses so you can try the workflow. <Link to="/settings#places">Add a Places API key</Link> to search real businesses with live phone numbers, ratings and websites.
+              Searches show clearly-labelled sample businesses until you <Link to="/settings#leads">connect a free Apify account</Link>, which gives about 1,250 real Google Maps leads a month with no card needed.
             </>
           )}
         </Banner>
+      )}
+      {job && running && (
+        <div className="card job-progress" role="status">
+          <Loader2 className="spin" style={{ animation: "spin 0.8s linear infinite" }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <b className="small">
+              {job.status === "scraping" ? `Searching Google Maps for “${job.niche}” in ${job.location}…` : `Found ${job.found} businesses. Checking their websites for emails…`}
+            </b>
+            <div className="faint small">
+              {job.status === "scraping"
+                ? "This usually takes 1 to 3 minutes. You can leave this page: the results are saved."
+                : `${job.contactsChecked} of ${job.contactsToCheck} websites checked, ${job.emailsFound} emails found so far.`}
+            </div>
+            {job.status === "finding-contacts" && <div className="meter"><span style={{ width: `${job.contactsToCheck ? Math.round((job.contactsChecked / job.contactsToCheck) * 100) : 100}%` }} /></div>}
+          </div>
+        </div>
       )}
       {sample && results && <Banner tone="warn">These are sample results, not real businesses.</Banner>}
 
@@ -167,7 +276,7 @@ export function Prospecting() {
       </div>
 
       <Card flush>
-        {searching ? (
+        {searching || (job?.status === "scraping" && view === "results" && !results?.length) ? (
           <LoadingRows n={8} />
         ) : rows.length ? (
           <div className="table-wrap" style={{ maxHeight: "calc(100vh - 300px)" }}>
@@ -181,7 +290,7 @@ export function Prospecting() {
                   <th>Business</th>
                   <th>Rating</th>
                   <th>Website</th>
-                  <th>Phone</th>
+                  <th>Phone · email</th>
                   <th>Signals</th>
                   <th />
                 </tr>
@@ -203,7 +312,10 @@ export function Prospecting() {
                       {p.rating !== null ? <><Star size={11} style={{ verticalAlign: -1 }} /> {p.rating.toFixed(1)} <span className="faint">({p.reviews})</span></> : <span className="faint">No reviews</span>}
                     </td>
                     <td>{p.website ? <span className="badge">{p.audit ? (p.audit.ok ? "Audited" : "Down") : "Has site"}</span> : <span className="badge bad">None</span>}</td>
-                    <td className="num small" style={{ whiteSpace: "nowrap" }}>{p.phone ? phoneDisplay(p.phone) : <span className="faint">—</span>}</td>
+                    <td className="small" style={{ whiteSpace: "nowrap" }}>
+                      {p.phone ? <div className="num">{phoneDisplay(p.phone)}</div> : <span className="faint">—</span>}
+                      {p.email && <div className="faint ellipsis" style={{ maxWidth: 220 }} title={p.email}><Mail size={11} style={{ verticalAlign: -1 }} /> {p.email}</div>}
+                    </td>
                     <td style={{ maxWidth: 280 }}>
                       <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
                         {p.signals.slice(0, 3).map((s) => <span key={s} className="tag">{s}</span>)}
@@ -308,6 +420,13 @@ function ProspectModal({ p, pipelines, onClose, onAudit, auditing, onUpdated }: 
         <div className="stack" style={{ gap: 6 }}>
           <div className="row"><MapPin size={14} className="faint" /> {p.address || "—"}</div>
           <div className="row"><Phone size={14} className="faint" /> {p.phone ? <a href={`tel:${p.phone}`}>{phoneDisplay(p.phone)}</a> : "No phone"}</div>
+          <div className="row"><Mail size={14} className="faint" /> {p.email ? <a href={`mailto:${p.email}`} className="ellipsis">{p.email}</a> : <span className="faint">{p.website && !p.audit ? "Run the website audit to look for an email" : "No email found"}</span>}</div>
+          {p.socials?.length ? (
+            <div className="row wrap" style={{ gap: 6 }}>
+              <Share2 size={14} className="faint" />
+              {p.socials.map((s) => <a key={s} href={s} target="_blank" rel="noreferrer" className="tag">{s.replace(/^https?:\/\/(www\.)?/, "").split("/")[0].replace(".com", "")}</a>)}
+            </div>
+          ) : null}
           <div className="row"><Globe size={14} className="faint" /> {p.website ? <a href={p.website} target="_blank" rel="noreferrer" className="ellipsis">{p.website.replace(/^https?:\/\/(www\.)?/, "")}</a> : <span style={{ color: "var(--bad)" }}>No website</span>}</div>
           {p.mapsUrl && <a href={p.mapsUrl} target="_blank" rel="noreferrer" className="row"><ExternalLink size={14} /> Google Maps listing</a>}
         </div>

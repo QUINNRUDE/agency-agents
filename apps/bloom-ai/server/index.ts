@@ -13,6 +13,7 @@ import { getSettings, publicSettings, saveSettings } from "./config.ts";
 import { activeDemo, crm, demoDataOn, localWorkspace, testGhl } from "./crm/index.ts";
 import { CrmError, SEND_CHANNELS, type Contact, type ContactInput, type Message, type Opportunity, type Pipeline } from "./crm/types.ts";
 import { auditWebsite, scoreProspect, searchBusinesses } from "./prospect.ts";
+import { apifyUsage, mergeProspects, PRICE_PER_PLACE, recentLeadJobs, refreshLeadJob, startLeadSearch } from "./leadFinder.ts";
 import { localDb, uid, type SavedView, type CallLog, type CallOutcome, type Prospect, type SiteAudit } from "./store.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -115,6 +116,13 @@ app.post(
             return { ok: false, message: d.error?.message ?? `Google returned ${r.status}` };
           }
           return { ok: true, message: "Google Places is working." };
+        }
+        case "apify": {
+          const u = await apifyUsage(secret(body.apifyToken, s.apifyToken));
+          return {
+            ok: true,
+            message: `Connected as ${u.username || "your Apify account"} (${u.plan} plan). $${u.leftUsd.toFixed(2)} of the $${u.creditUsd.toFixed(2)} included this month is left, enough for about ${u.leadsLeft.toLocaleString("en-US")} leads.`,
+          };
         }
         default:
           return { ok: false, message: "Unknown service" };
@@ -719,18 +727,26 @@ app.get("/api/prospects", route(async () => [...localDb.read().prospects].sort((
 app.post(
   "/api/prospects/search",
   route(async (req) => {
-    const { prospects, sample } = await searchBusinesses(req.body ?? {});
-    const existing = localDb.read().prospects;
-    const byPlace = new Map(existing.map((p) => [p.placeId, p]));
-    const merged = prospects.map((p) => {
-      const prev = byPlace.get(p.placeId);
-      return prev ? scoreProspect({ ...p, id: prev.id, audit: prev.audit, status: prev.status, contactId: prev.contactId }) : p;
-    });
-    localDb.update((d) => {
-      const ids = new Set(merged.map((m) => m.placeId));
-      d.prospects = [...merged, ...d.prospects.filter((p) => !ids.has(p.placeId))].slice(0, 2000);
-    });
-    return { prospects: merged, sample };
+    const b = req.body ?? {};
+    const s = getSettings();
+    // Apify (Google Maps, free monthly credit) runs in the background; Google Places answers right away.
+    const useApify = b.source === "apify" || (b.source !== "google" && Boolean(s.apifyToken) && !s.googlePlacesApiKey);
+    if (useApify) {
+      const job = await startLeadSearch({ niche: b.niche, location: b.location, max: b.maxResults });
+      return { job, prospects: [], sample: false };
+    }
+    const { prospects, sample } = await searchBusinesses(b);
+    return { prospects: mergeProspects(prospects), sample };
+  }),
+);
+
+app.get("/api/lead-jobs", route(async () => recentLeadJobs()));
+app.get("/api/lead-jobs/:id", route(async (req) => refreshLeadJob(param(req, "id"))));
+app.get(
+  "/api/lead-finder/usage",
+  route(async () => {
+    if (!getSettings().apifyToken) return { connected: false, pricePerLead: PRICE_PER_PLACE };
+    return { connected: true, pricePerLead: PRICE_PER_PLACE, ...(await apifyUsage()) };
   }),
 );
 
@@ -778,7 +794,14 @@ app.post(
       return { error: "This business has no website to audit — that's the pitch." };
     }
     const audit = p.sample ? simulatedAudit(p) : await auditWebsite(p.website);
-    const updated = scoreProspect({ ...p, audit });
+    // The website check also finds contact details: fill in what the listing didn't have.
+    const updated = scoreProspect({
+      ...p,
+      audit,
+      email: p.email || audit.emails?.[0] || "",
+      phone: p.phone || audit.phones?.[0] || "",
+      socials: [...new Set([...(p.socials ?? []), ...(audit.socials ?? [])])].slice(0, 6),
+    });
     localDb.update((d) => {
       d.prospects = d.prospects.map((x) => (x.id === p.id ? updated : x));
     });
@@ -813,6 +836,7 @@ app.post(
       firstName: String(req.body?.firstName ?? ""),
       lastName: String(req.body?.lastName ?? ""),
       phone: p.phone,
+      email: p.email ?? "",
       website: p.website,
       city: p.city,
       source: "Bloom AI Finder",
@@ -823,6 +847,8 @@ app.post(
       `Opportunity score ${p.score}/100 — ${p.signals.join(", ") || "no flags"}.`,
       p.rating !== null ? `Google rating ${p.rating} from ${p.reviews} reviews.` : "No Google rating.",
       p.address && `Address: ${p.address}`,
+      p.email && `Email: ${p.email}`,
+      p.socials?.length && `Social: ${p.socials.join(" · ")}`,
       p.mapsUrl && `Maps: ${p.mapsUrl}`,
       p.audit && `\nWebsite audit:\n${p.audit.findings.map((f) => `• ${f.text}`).join("\n")}`,
     ]

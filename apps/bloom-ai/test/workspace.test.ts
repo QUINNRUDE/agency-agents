@@ -66,7 +66,7 @@ try {
     assert.deepEqual([ads.sample, ads.connected, ads.campaigns.length, ads.totals.spend], [false, false, 0, 0]);
     const found = await j("POST", "/api/prospects/search", { niche: "roofers", location: "Austin, TX" });
     assert.equal(found._status, 400);
-    assert.match(found.error, /Google Places API key/);
+    assert.match(found.error, /Connect Apify/);
     const assets = await j("GET", "/api/meta/assets");
     assert.deepEqual([assets.connected, assets.adAccounts.length], [false, 0]);
     const camp = await j("POST", "/api/meta/campaigns", { name: "x", pageId: "p", primaryText: "t", headline: "h", image: { hash: "h" }, form: { id: "f" }, dailyBudget: 10 });

@@ -1,8 +1,8 @@
 import type { Appointment, Contact, CustomField, Message, Note, Opportunity, Pipeline, Task, User } from "../../server/crm/types.ts";
-import type { CallLog, CallOutcome, Prospect, SavedView, SiteAudit } from "../../server/store.ts";
+import type { CallLog, CallOutcome, LeadJob, Prospect, SavedView, SiteAudit } from "../../server/store.ts";
 import type { AgentMeta, Agent } from "../../server/agents.ts";
 
-export type { Appointment, Contact, CustomField, Message, Note, Opportunity, Pipeline, Task, User, SavedView, CallLog, CallOutcome, Prospect, SiteAudit, AgentMeta, Agent };
+export type { Appointment, Contact, CustomField, Message, Note, Opportunity, Pipeline, Task, User, SavedView, CallLog, CallOutcome, LeadJob, Prospect, SiteAudit, AgentMeta, Agent };
 
 export class ApiError extends Error {
   constructor(
@@ -51,7 +51,7 @@ export const api = {
 export interface Status {
   ok: boolean;
   crm: { mode: "ghl" | "demo"; accountName: string; sample?: boolean };
-  has: { ghl: boolean; claude: boolean; places: boolean; meta: boolean };
+  has: { ghl: boolean; claude: boolean; places: boolean; meta: boolean; apify?: boolean };
   authEnabled?: boolean;
   /** Sample business, sample ad numbers and sample prospects are shown until the user removes them. */
   demoData?: boolean;

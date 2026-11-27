@@ -96,6 +96,10 @@ export interface Prospect {
   sample: boolean;
   foundAt: string;
   search: string;
+  /** Where the lead came from. Missing on older records (Google Places or sample). */
+  source?: "google" | "apify" | "sample";
+  email?: string;
+  socials?: string[];
 }
 
 export interface SiteAudit {
@@ -115,6 +119,10 @@ export interface SiteAudit {
   copyrightYear: number | null;
   findings: { level: "good" | "warn" | "bad"; text: string }[];
   checkedAt: string;
+  /** Contact details found on the site (homepage and contact page). Missing on older audits. */
+  emails?: string[];
+  phones?: string[];
+  socials?: string[];
 }
 
 export interface SavedView {
@@ -138,21 +146,44 @@ export interface MetaLead {
   phone: string;
 }
 
+/** A lead search running on Apify, then a free contact scan of each lead's website. */
+export interface LeadJob {
+  id: string;
+  niche: string;
+  location: string;
+  max: number;
+  runId: string;
+  datasetId: string;
+  status: "scraping" | "finding-contacts" | "done" | "failed";
+  startedAt: string;
+  finishedAt?: string;
+  error: string;
+  found: number;
+  contactsToCheck: number;
+  contactsChecked: number;
+  emailsFound: number;
+  prospectIds: string[];
+  estimateUsd: number;
+  costUsd: number | null;
+}
+
 export interface LocalDb {
   calls: CallLog[];
   prospects: Prospect[];
   views: SavedView[];
   metaLeads: MetaLead[];
   metaSync: { lastSyncAt: string; lastLeadTime: string; lastError: string };
+  leadJobs: LeadJob[];
 }
 
-const localFile = new JsonFile<LocalDb>("local.json", () => ({ calls: [], prospects: [], views: [], metaLeads: [], metaSync: { lastSyncAt: "", lastLeadTime: "", lastError: "" } }));
+const localFile = new JsonFile<LocalDb>("local.json", () => ({ calls: [], prospects: [], views: [], metaLeads: [], metaSync: { lastSyncAt: "", lastLeadTime: "", lastError: "" }, leadJobs: [] }));
 export const localDb = {
   read(): LocalDb {
     const d = localFile.read();
     d.views ??= [];
     d.metaLeads ??= [];
     d.metaSync ??= { lastSyncAt: "", lastLeadTime: "", lastError: "" };
+    d.leadJobs ??= [];
     return d;
   },
   update(fn: (d: LocalDb) => void): LocalDb {

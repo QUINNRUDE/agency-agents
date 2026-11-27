@@ -54,7 +54,7 @@ export async function searchBusinesses(input: SearchInput): Promise<{ prospects:
   const key = getSettings().googlePlacesApiKey;
   const search = `${input.niche} in ${input.location}`.trim();
   if (!key) {
-    if (!demoDataOn()) throw new CrmError("Add your Google Places API key in Settings → Google Places to search real businesses.", 400);
+    if (!demoDataOn()) throw new CrmError("Connect Apify (a free account works) in Settings → Lead finder, or add a Google Places key, to search real businesses.", 400);
     return { prospects: sampleProspects(input, search), sample: true };
   }
 
@@ -157,7 +157,11 @@ export function scoreProspect(p: Prospect): Prospect {
 
 // ---- Website audit -----------------------------------------------------
 
+// Tests serve sample websites from localhost; never set this in production.
+const ALLOW_PRIVATE = process.env.BLOOM_AUDIT_ALLOW_PRIVATE === "1";
+
 function isPrivateIp(ip: string): boolean {
+  if (ALLOW_PRIVATE) return false;
   if (net.isIPv4(ip)) {
     const [a, b] = ip.split(".").map(Number);
     return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
@@ -179,6 +183,50 @@ const ANALYTICS = [
   ["googletagmanager.com", "Google Tag Manager"], ["gtag(", "Google Analytics"], ["google-analytics.com", "Google Analytics"],
   ["fbq(", "Meta Pixel"], ["connect.facebook.net", "Meta Pixel"], ["hotjar", "Hotjar"], ["clarity.ms", "Microsoft Clarity"], ["callrail", "CallRail"],
 ] as const;
+
+// ---- Contact details on a business website ------------------------------
+
+const JUNK_EMAIL = /\.(png|jpe?g|gif|svg|webp|css|js)$|@(sentry|wixpress|example|domain|email|yourdomain|yoursite|mysite|company)\.|^(name|your|you|email|user|username|test)@|@2x|u00/i;
+const SOCIAL = /https?:\/\/(?:www\.)?(facebook\.com|instagram\.com|linkedin\.com\/(?:company|in)|youtube\.com|tiktok\.com|x\.com|twitter\.com)\/[^"'\s<>?#]+/gi;
+
+/** Emails, phone numbers and social profiles published on a page. */
+export function extractContacts(html: string): { emails: string[]; phones: string[]; socials: string[] } {
+  const decoded = html.replace(/&#64;|&#x40;|\[at\]|\(at\)/gi, "@").replace(/&#46;|&#x2e;/gi, ".");
+  const emails = new Set<string>();
+  for (const m of decoded.matchAll(/mailto:([^"'?\s>]+)/gi)) emails.add(decodeURIComponent(m[1]).toLowerCase());
+  for (const m of decoded.matchAll(/[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}/gi)) emails.add(m[0].toLowerCase());
+  const phones = new Set<string>();
+  for (const m of html.matchAll(/href=["']tel:([^"']+)["']/gi)) {
+    const digits = decodeURIComponent(m[1]).replace(/[^\d+]/g, "");
+    const n = digits.replace(/^\+?1(?=\d{10}$)/, "");
+    if (/^\d{10}$/.test(n)) phones.add(`+1${n}`);
+    else if (/^\+\d{8,15}$/.test(digits)) phones.add(digits);
+  }
+  const socials = new Set<string>();
+  for (const m of html.matchAll(SOCIAL)) {
+    const url = m[0].replace(/\/$/, "");
+    if (!/sharer|share\?|\/share|intent\/|dialog\/|plugins\/|\/tr$|\/p\/|\/watch|\/embed/i.test(url)) socials.add(url);
+  }
+  return {
+    emails: [...emails].filter((e) => !JUNK_EMAIL.test(e) && e.length < 80).slice(0, 5),
+    phones: [...phones].slice(0, 3),
+    socials: [...socials].slice(0, 6),
+  };
+}
+
+/** Finds the site's contact page link, if it has one on the same host. */
+function contactPageUrl(html: string, base: string): string | null {
+  for (const m of html.matchAll(/href=["']([^"'#]+)["']/gi)) {
+    if (!/contact|get-in-touch|reach-us|about/i.test(m[1])) continue;
+    try {
+      const u = new URL(m[1], base);
+      if (u.hostname === new URL(base).hostname && /^https?:$/.test(u.protocol)) return u.toString();
+    } catch {
+      /* not a usable link */
+    }
+  }
+  return null;
+}
 
 export async function auditWebsite(rawUrl: string): Promise<SiteAudit> {
   const findings: SiteAudit["findings"] = [];
@@ -258,6 +306,28 @@ export async function auditWebsite(rawUrl: string): Promise<SiteAudit> {
     })(),
     findings,
   };
+
+  // Contact details: the homepage first, then the contact page if the homepage has no email.
+  const contacts = extractContacts(html);
+  if (!contacts.emails.length && audit.ok) {
+    const page = contactPageUrl(html, audit.url);
+    if (page) {
+      try {
+        const r = await fetch(page, { redirect: "follow", headers: { "User-Agent": "Mozilla/5.0 (compatible; BloomAudit/1.0)", Accept: "text/html" }, signal: AbortSignal.timeout(8_000) });
+        if (r.ok && new URL(r.url || page).hostname === new URL(audit.url).hostname) {
+          const more = extractContacts((await r.text()).slice(0, 1_000_000));
+          contacts.emails.push(...more.emails.filter((e) => !contacts.emails.includes(e)));
+          contacts.phones.push(...more.phones.filter((p) => !contacts.phones.includes(p)));
+          contacts.socials.push(...more.socials.filter((x) => !contacts.socials.includes(x)));
+        }
+      } catch {
+        /* the homepage results stand */
+      }
+    }
+  }
+  audit.emails = contacts.emails.slice(0, 5);
+  audit.phones = contacts.phones.slice(0, 3);
+  audit.socials = contacts.socials.slice(0, 6);
 
   if (!audit.ok) findings.push({ level: "bad", text: `Website returned HTTP ${audit.statusCode}.` });
   findings.push(audit.https ? { level: "good", text: "Served over HTTPS." } : { level: "bad", text: "No HTTPS — browsers show “Not secure”." });
