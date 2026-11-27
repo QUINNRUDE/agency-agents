@@ -85,6 +85,18 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   res.redirect(302, `/login?next=${encodeURIComponent(req.originalUrl)}`);
 }
 
+/** What a phone keyboard may have changed when the password was typed: curly quotes, long dashes,
+ * non-breaking or trailing spaces. Case is left alone. */
+export function normalizePassword(v: string): string {
+  return v
+    .normalize("NFKC")
+    .replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/\u2014/g, "--")
+    .replace(/\u2013/g, "-")
+    .trim();
+}
+
 export function mountAuthRoutes(app: import("express").Express) {
   app.get("/api/health", (_req, res) => res.json({ ok: true }));
   app.get("/login", (req, res) => {
@@ -95,11 +107,13 @@ export function mountAuthRoutes(app: import("express").Express) {
         "Welcome back",
         `<form id="f" autocomplete="on">
           <label for="pw">Password</label>
-          <input id="pw" name="password" type="password" autocomplete="current-password" autofocus required />
+          <input id="pw" name="password" type="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" autofocus required />
+          <label style="display:flex;gap:8px;align-items:center;font-weight:400;margin-top:-4px"><input type="checkbox" id="show" style="width:auto;margin:0" /> Show password</label>
           <button type="submit">Log in</button>
           <p id="err" role="alert"></p>
         </form>
         <script>
+          document.getElementById('show').addEventListener('change', (e) => { document.getElementById('pw').type = e.target.checked ? 'text' : 'password'; });
           document.getElementById('f').addEventListener('submit', async (e) => {
             e.preventDefault();
             const err = document.getElementById('err');
@@ -116,12 +130,13 @@ export function mountAuthRoutes(app: import("express").Express) {
     const ip = req.ip ?? "unknown";
     if (!authEnabled) return res.json({ ok: true });
     if (limited(ip)) return res.status(429).json({ error: "Too many attempts. Try again in 15 minutes." });
-    const given = Buffer.from(String(req.body?.password ?? ""));
-    const want = Buffer.from(password);
-    const ok = given.length === want.length && crypto.timingSafeEqual(given, want);
+    // Compare hashes of the normalized text, so length isn't leaked and phone keyboards' "smart"
+    // characters or a stray space don't lock the owner out. Letter case still matters.
+    const digest = (v: string) => crypto.createHash("sha256").update(normalizePassword(v)).digest();
+    const ok = crypto.timingSafeEqual(digest(String(req.body?.password ?? "")), digest(password));
     if (!ok) {
       fail(ip);
-      return res.status(401).json({ error: "Wrong password" });
+      return res.status(401).json({ error: "Wrong password. Capital letters count: if you set it on a phone, the first letter may have been capitalized automatically. Tick “Show password” to check what you typed." });
     }
     attempts.delete(ip);
     setSession(req, res);
