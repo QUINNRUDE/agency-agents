@@ -16,9 +16,9 @@
 
 ---
 
-> ### 🧭 Clientline — a client command center powered by these agents
+> ### 🌸 Bloom AI — a client command center powered by these agents
 >
-> [`apps/clientline`](apps/clientline) is a working dashboard that finds, tracks and manages clients, runs your calls, and puts every agent here to work on real client data. It connects to GoHighLevel. → [Read more](apps/clientline/README.md)
+> [`apps/bloom-ai`](apps/bloom-ai) is a working dashboard that finds, tracks and manages clients, runs your calls, sends texts and Instagram / Messenger DMs on autopilot, and tracks Meta ads all the way to revenue. It connects to GoHighLevel and Meta and puts every agent here to work on real client data. → [Read more](apps/bloom-ai/README.md)
 
 ---
 
