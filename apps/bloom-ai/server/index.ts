@@ -25,6 +25,11 @@ const smallJson = express.json({ limit: "2mb" });
 app.use((req, res, next) => (BIG_BODY(req) ? next() : smallJson(req, res, next)));
 mountAuthRoutes(app);
 app.use(authMiddleware);
+// CRM data must never come from a browser or phone cache (for example right after demo data is removed).
+app.use("/api", (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
 app.use("/api/meta/campaigns", express.json({ limit: "15mb" }));
 
 // Any successful change to CRM data asks the automation engine to look for new triggers right away.
