@@ -126,7 +126,10 @@ export function scoreProspect(p: Prospect): Prospect {
     score += 10;
     signals.push(`Rating ${p.rating.toFixed(1)}`);
   }
-  if (p.reviews < 30) {
+  // OpenStreetMap has no reviews, so the count says nothing there.
+  if (p.source === "osm") {
+    /* no review signal */
+  } else if (p.reviews < 30) {
     score += 12;
     signals.push(`Only ${p.reviews} reviews`);
   } else if (p.reviews < 100) {

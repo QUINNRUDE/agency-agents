@@ -14,7 +14,7 @@ Bloom AI is a client command center built on the Agency Agents roster. It finds 
 | **Meta Ads** | **Create and launch lead-ad campaigns** for your own business or a client's: audience, image, AI-written copy, lead form and budget on one page. Spend, leads, cost per lead, CTR and CPM with daily charts. **What the ads actually made**: Meta leads in the CRM, customers won, revenue, ROAS and cost per customer. Pause or turn on campaigns and edit daily budgets inline. Lead Ads sync into the CRM, and an AI ad review |
 | **Clients (CRM)** | People and Companies views, smart and saved views, filters, bulk actions, CSV import, a duplicate finder, owners and custom fields |
 | **Pipeline · Tasks · Calls** | Drag-and-drop deals (with confetti when one is won), an account-wide task list, and a ranked call queue with a live call workspace |
-| **Find clients** | Free Google Maps lead search through Apify (about 1,250 leads a month on Apify's Free plan), or Google Places. A free email, phone and social-link finder on each lead's website, opportunity scoring, website audits, and one-click import into your CRM |
+| **Find clients** | A built-in free scraper (OpenStreetMap: no key, no account, no limit), Google Maps through Apify (about 1,250 leads a month on Apify's Free plan), or Google Places. A free email, phone and social-link finder on each lead's website, opportunity scoring, website audits, and one-click import into your CRM |
 | **AI Agents** | All 283 agents in this repo, available to chat with or wired into playbooks, with a client's CRM history attached |
 
 Pick from five colour themes (Rose, Violet, Ocean, Sunset, Forest) in the sidebar. Dark mode follows your system or the top-bar toggle.
@@ -121,7 +121,8 @@ Use **Settings** in the app, or copy `.env.example` to `.env`. Values in `.env` 
 - **GoHighLevel**: Sub-account → Settings → Private Integrations. Scopes needed: contacts, opportunities, calendars/events, conversations and conversation messages (read/write), and locations. Optional: users, custom fields and location tasks (read).
 - **Meta**: see above.
 - **Claude**: an Anthropic API key powers the AI-written messages, drafts and every agent playbook. The default model is Claude Opus 5.5.
-- **Apify (free)**: powers *Find clients* with Google Maps leads. Create a free account at apify.com, then go to Apify Console → Settings → API & Integrations → Personal API tokens → Create a new token, and paste it in **Settings → Lead finder**. The Free plan includes $5 of usage a month, about 1,250 leads at $0.004 each, and stops instead of charging when it runs out. Bloom AI checks what's left before each search, caps every run, and finds emails on each lead's own website itself, so no paid add-ons are used.
+- **Nothing at all** for the free scraper in *Find clients*: it searches OpenStreetMap (no key, no account, no limit) and checks each website for an email. OpenStreetMap lists fewer businesses than Google and has no ratings, so search a few nearby cities. Business data © OpenStreetMap contributors (ODbL).
+- **Apify (free, optional)**: adds Google Maps leads to *Find clients*. Create a free account at apify.com, then go to Apify Console → Settings → API & Integrations → Personal API tokens → Create a new token, and paste it in **Settings → Lead finder**. The Free plan includes $5 of usage a month, about 1,250 leads at $0.004 each, and stops instead of charging when it runs out. Bloom AI checks what's left before each search, caps every run, and finds emails on each lead's own website itself, so no paid add-ons are used.
 - **Google Places** (optional): an alternative source for *Find clients*.
 - **Business profile**: your name, business, offer, pricing and booking link. Every message and agent uses it.
 
@@ -132,7 +133,7 @@ API keys, call logs, prospects, synced Meta leads and automation history are sto
 ## Tests
 
 ```bash
-npm test            # GoHighLevel CRM (24) + Meta Ads, campaign builder, automations & broadcasts (27) + demo-data removal (4) + lead finder (6), against mock APIs
+npm test            # GoHighLevel CRM (24) + Meta Ads, campaign builder, automations & broadcasts (27) + demo-data removal (4) + lead finder (8), against mock APIs
 npm run typecheck
 ```
 
@@ -151,6 +152,7 @@ server/
   agents.ts         Indexes every agent in the repo
   prospect.ts       Google Places search, scoring, website audit + contact finder
   leadFinder.ts     Free Google Maps lead search through Apify, with credit checks
+  osm.ts            Built-in free scraper: OpenStreetMap (Nominatim + Overpass), no key
 src/                React UI (Vite)
 test/               Mock GoHighLevel + Meta APIs and integration tests
 ```

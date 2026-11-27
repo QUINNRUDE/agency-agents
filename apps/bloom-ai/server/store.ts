@@ -97,7 +97,7 @@ export interface Prospect {
   foundAt: string;
   search: string;
   /** Where the lead came from. Missing on older records (Google Places or sample). */
-  source?: "google" | "apify" | "sample";
+  source?: "google" | "apify" | "osm" | "sample";
   email?: string;
   socials?: string[];
 }

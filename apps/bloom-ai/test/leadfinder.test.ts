@@ -40,9 +40,43 @@ site.get("/", (_q, s) => s.type("html").send(`<html><head><title>Summit Roofing<
 site.get("/contact-us", (_q, s) => s.type("html").send(`<html><body>Email us: <a href="mailto:owner@summitroofing.co">owner@summitroofing.co</a></body></html>`));
 const siteServer = site.listen(4562);
 
+// --- A stand-in for OpenStreetMap (Nominatim + Overpass) -------------------------------
+const overpassQueries: string[] = [];
+const osm = express();
+osm.use(express.urlencoded({ extended: false }));
+osm.get("/nominatim/search", (q, s) =>
+  s.json(q.query.q === "Nowhere, ZZ" ? [] : [{ lat: "30.2649", lon: "-97.7474", name: "Austin", display_name: "Austin, Travis County, Texas, United States", boundingbox: ["30.0985133", "30.5166255", "-97.9367663", "-97.5605288"], address: { city: "Austin", state: "Texas" } }]),
+);
+osm.post("/overpass", (q, s) => {
+  overpassQueries.push(String(q.body.data));
+  s.json({
+    elements: [
+      { type: "node", id: 101, tags: { craft: "roofer", name: "Barker Roofing", phone: "+1 512-555-0201; 512-555-0202", website: SITE, "addr:housenumber": "12", "addr:street": "Oak St", "addr:city": "Austin", "addr:state": "TX", "addr:postcode": "78701" } },
+      { type: "way", id: 202, center: { lat: 30.3, lon: -97.7 }, tags: { craft: "roofer", name: "Alta Roofing, LLC", phone: "(512) 555-0203", email: "office@altaroofing.co" } },
+      { type: "node", id: 303, tags: { "disused:craft": "roofer", name: "Old Roofs Inc" } },
+      { type: "node", id: 404, tags: { craft: "roofer", name: "Barker Roofing", phone: "512-555-0201" } },
+      { type: "node", id: 505, tags: { craft: "roofer" } },
+    ],
+  });
+});
+const osmServer = osm.listen(4564);
+
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "bloom-leads-"));
 const server = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
-  env: { ...process.env, PORT: "4563", BLOOM_DATA_DIR: dataDir, APIFY_API_BASE: "http://localhost:4561", APIFY_TOKEN: TOKEN, BLOOM_AUDIT_ALLOW_PRIVATE: "1", GHL_API_KEY: "", GOOGLE_PLACES_API_KEY: "", ANTHROPIC_API_KEY: "", META_ACCESS_TOKEN: "" },
+  env: {
+    ...process.env,
+    PORT: "4563",
+    BLOOM_DATA_DIR: dataDir,
+    APIFY_API_BASE: "http://localhost:4561",
+    APIFY_TOKEN: TOKEN,
+    OSM_NOMINATIM_URL: "http://localhost:4564/nominatim",
+    OSM_OVERPASS_URL: "http://localhost:4564/overpass",
+    BLOOM_AUDIT_ALLOW_PRIVATE: "1",
+    GHL_API_KEY: "",
+    GOOGLE_PLACES_API_KEY: "",
+    ANTHROPIC_API_KEY: "",
+    META_ACCESS_TOKEN: "",
+  },
   stdio: "pipe",
 });
 const base = "http://localhost:4563";
@@ -126,6 +160,39 @@ try {
     assert.equal(runs.length, before);
   });
 
+  await test("the free scraper finds businesses on OpenStreetMap with no key, then finds emails on their sites", async () => {
+    const r = await j("POST", "/api/prospects/search", { source: "free", niche: "Roofers", location: "Austin, TX", maxResults: 100 });
+    assert.equal(r._status, 200);
+    const q = overpassQueries.at(-1) ?? "";
+    assert.match(q, /nwr\["craft"="roofer"\]\["name"\]\(30\.0985,-97\.9368,30\.5166,-97\.5605\);/);
+    assert.match(q, /\["name"~"roof",i\]\["craft"\]/);
+    // Closed, nameless and duplicate listings are dropped.
+    assert.deepEqual(r.prospects.map((p: { name: string }) => p.name).sort(), ["Alta Roofing, LLC", "Barker Roofing"]);
+    const barker = r.prospects.find((p: { name: string }) => p.name === "Barker Roofing");
+    assert.equal(barker.phone, "+15125550201");
+    assert.equal(barker.address, "12 Oak St, Austin, TX 78701");
+    assert.equal(barker.source, "osm");
+    assert.equal(barker.mapsUrl, "https://www.openstreetmap.org/node/101");
+    assert.ok(!barker.signals.some((s: string) => /reviews/.test(s)), "no review signals for map listings");
+    const alta = r.prospects.find((p: { name: string }) => p.name === "Alta Roofing, LLC");
+    assert.deepEqual([alta.phone, alta.email, alta.city], ["+15125550203", "office@altaroofing.co", "Austin"]);
+    // The website check runs in the background and fills in Barker's email.
+    let job = await j("GET", `/api/lead-jobs/${r.job.id}`);
+    for (let i = 0; i < 40 && job.job.status !== "done"; i++) {
+      await new Promise((res) => setTimeout(res, 250));
+      job = await j("GET", `/api/lead-jobs/${r.job.id}`);
+    }
+    assert.equal(job.job.status, "done");
+    assert.equal(job.prospects.find((p: { name: string }) => p.name === "Barker Roofing").email, "owner@summitroofing.co");
+    assert.equal(job.job.emailsFound, 2);
+  });
+
+  await test("the free scraper explains a place it can't find", async () => {
+    const r = await j("POST", "/api/prospects/search", { source: "free", niche: "roofers", location: "Nowhere, ZZ" });
+    assert.equal(r._status, 400);
+    assert.match(r.error, /Couldn't find “Nowhere, ZZ”/);
+  });
+
   await test("a bad token gets a clear message", async () => {
     const r = await j("POST", "/api/settings/test/apify", { apifyToken: "wrong" });
     assert.equal(r.ok, false);
@@ -137,5 +204,6 @@ try {
   server.kill();
   apifyServer.close();
   siteServer.close();
+  osmServer.close();
   fs.rmSync(dataDir, { recursive: true, force: true });
 }

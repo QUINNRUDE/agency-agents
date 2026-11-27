@@ -8,7 +8,9 @@ import { Banner, Card, Empty, Field, LoadingRows, Modal, ScoreBadge, useAsync, u
 import { useApp } from "../App.tsx";
 
 const NICHES = ["Dentists", "Roofers", "Med spas", "HVAC", "Plumbers", "Chiropractors", "Law firms", "Landscapers", "Auto repair", "Real estate agents"];
-const APIFY_SIZES = [25, 50, 100, 150, 250];
+type Source = "free" | "apify" | "google";
+const SIZES: Record<Source, number[]> = { free: [50, 100, 200], apify: [25, 50, 100, 150, 250], google: [20, 40, 60] };
+const DEFAULT_SIZE: Record<Source, number> = { free: 100, apify: 50, google: 40 };
 
 interface Usage {
   connected: boolean;
@@ -28,12 +30,18 @@ const isRunning = (j: LeadJob | null) => j?.status === "scraping" || j?.status =
 export function Prospecting() {
   const { status } = useApp();
   const toast = useToast();
-  const apify = Boolean(status?.has.apify);
-  const usage = useAsync(() => (apify ? api.get<Usage>("/api/lead-finder/usage") : Promise.resolve<Usage>({ connected: false, pricePerLead: 0.004 })), [apify]);
+  const apifyConnected = Boolean(status?.has.apify);
+  const placesConnected = Boolean(status?.has.places);
+  const [source, setSource] = useState<Source>("free");
+  useEffect(() => {
+    if (apifyConnected) setSource((s) => (s === "free" ? "apify" : s));
+  }, [apifyConnected]);
+  const apify = source === "apify";
+  const usage = useAsync(() => (apifyConnected ? api.get<Usage>("/api/lead-finder/usage") : Promise.resolve<Usage>({ connected: false, pricePerLead: 0.004 })), [apifyConnected]);
   const [job, setJob] = useState<LeadJob | null>(null);
   const [niche, setNiche] = useState("");
   const [location, setLocation] = useState("");
-  const [max, setMax] = useState(40);
+  const [max, setMax] = useState(100);
   const [minRating, setMinRating] = useState(0);
   const [noSite, setNoSite] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -48,12 +56,11 @@ export function Prospecting() {
   const pipelines = useAsync(() => api.get<Pipeline[]>("/api/pipelines"));
 
   useEffect(() => {
-    if (apify && !APIFY_SIZES.includes(max)) setMax(50);
-  }, [apify]);
+    if (!SIZES[source].includes(max)) setMax(DEFAULT_SIZE[source]);
+  }, [source]);
 
   // A search keeps running on the server if you leave the page: pick it back up.
   useEffect(() => {
-    if (!apify) return;
     api
       .get<LeadJob[]>("/api/lead-jobs")
       .then((list) => {
@@ -61,7 +68,7 @@ export function Prospecting() {
         if (live) setJob(live);
       })
       .catch(() => undefined);
-  }, [apify]);
+  }, []);
 
   const running = isRunning(job);
   useEffect(() => {
@@ -102,16 +109,12 @@ export function Prospecting() {
     setView("results");
     setSelected(new Set());
     try {
-      const r = await api.post<{ prospects: Prospect[]; sample: boolean; job?: LeadJob }>("/api/prospects/search", { niche, location, maxResults: max, minRating: minRating || undefined, onlyNoWebsite: noSite });
-      if (r.job) {
-        setJob(r.job);
-        setResults([]);
-        setSample(false);
-      } else {
-        setResults(r.prospects);
-        setSample(r.sample);
-        saved.reload();
-      }
+      const r = await api.post<{ prospects: Prospect[]; sample: boolean; job?: LeadJob }>("/api/prospects/search", { source, niche, location, maxResults: max, minRating: minRating || undefined, onlyNoWebsite: noSite });
+      setResults(r.prospects);
+      setSample(r.sample);
+      if (r.job) setJob(r.job);
+      if (r.prospects.length) saved.reload();
+      if (source === "free" && !r.prospects.length) toast("OpenStreetMap has no listings for that here. Try a nearby city, different wording, or Google Maps via Apify.", "bad");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Search failed", "bad");
     } finally {
@@ -166,12 +169,35 @@ export function Prospecting() {
       <div className="page-head">
         <div>
           <h2>Find clients</h2>
-          <p>Search Google Maps for local businesses, find their phone and email, and add the best fits to your CRM.</p>
+          <p>Find local businesses with the free scraper or Google Maps, get their phone and email, and add the best fits to your CRM.</p>
         </div>
       </div>
 
       <Card>
         <div className="stack">
+          <div className="source-pick" role="radiogroup" aria-label="Where to search">
+            <button role="radio" aria-checked={source === "free"} className={`source-opt ${source === "free" ? "on" : ""}`} onClick={() => setSource("free")}>
+              <b>Free scraper</b>
+              <span>OpenStreetMap · no key, no limit</span>
+            </button>
+            <button role="radio" aria-checked={source === "apify"} className={`source-opt ${source === "apify" ? "on" : ""}`} onClick={() => (apifyConnected ? setSource("apify") : undefined)} disabled={!apifyConnected}>
+              <b>Google Maps</b>
+              <span>{apifyConnected ? "Apify · free monthly credit" : "Connect free Apify first"}</span>
+            </button>
+            {placesConnected && (
+              <button role="radio" aria-checked={source === "google"} className={`source-opt ${source === "google" ? "on" : ""}`} onClick={() => setSource("google")}>
+                <b>Google Places</b>
+                <span>Your Places API key</span>
+              </button>
+            )}
+          </div>
+          {source === "free" && (
+            <div className="faint small">
+              Free and unlimited. OpenStreetMap lists fewer businesses than Google and has no ratings, so search a few nearby cities for more. Bloom AI checks each website for an email.{" "}
+              {!apifyConnected && <>For Google Maps data, <Link to="/settings#leads">connect a free Apify account</Link>.</>} Business data ©{" "}
+              <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>.
+            </div>
+          )}
           <div className="row wrap" style={{ alignItems: "flex-end" }}>
             <div style={{ flex: "1 1 220px" }}>
               <Field label="Business type">
@@ -186,7 +212,7 @@ export function Prospecting() {
             <div style={{ width: 110 }}>
               <Field label="Max results">
                 <select className="select" value={max} onChange={(e) => setMax(Number(e.target.value))}>
-                  {(apify ? APIFY_SIZES : [20, 40, 60]).map((n) => <option key={n} value={n}>{n}</option>)}
+                  {SIZES[source].map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
               </Field>
             </div>
@@ -229,19 +255,6 @@ export function Prospecting() {
         </div>
       )}
       {apify && usage.error && <Banner tone="bad">Apify: {usage.error} <Link to="/settings#leads">Check the token</Link></Banner>}
-      {!apify && !status?.has.places && (
-        <Banner tone="info">
-          {status?.demoData === false ? (
-            <>
-              Search Google Maps for free: <Link to="/settings#leads">connect a free Apify account</Link>. That's about 1,250 real leads a month with no card needed. Until then, you can add clients with Clients → Import.
-            </>
-          ) : (
-            <>
-              Searches show clearly-labelled sample businesses until you <Link to="/settings#leads">connect a free Apify account</Link>, which gives about 1,250 real Google Maps leads a month with no card needed.
-            </>
-          )}
-        </Banner>
-      )}
       {job && running && (
         <div className="card job-progress" role="status">
           <Loader2 className="spin" style={{ animation: "spin 0.8s linear infinite" }} />
@@ -309,7 +322,7 @@ export function Prospecting() {
                       <div className="faint small ellipsis">{p.category} · {p.address}</div>
                     </td>
                     <td className="num small" style={{ whiteSpace: "nowrap" }}>
-                      {p.rating !== null ? <><Star size={11} style={{ verticalAlign: -1 }} /> {p.rating.toFixed(1)} <span className="faint">({p.reviews})</span></> : <span className="faint">No reviews</span>}
+                      {p.rating !== null ? <><Star size={11} style={{ verticalAlign: -1 }} /> {p.rating.toFixed(1)} <span className="faint">({p.reviews})</span></> : <span className="faint">{p.source === "osm" ? "Not listed" : "No reviews"}</span>}
                     </td>
                     <td>{p.website ? <span className="badge">{p.audit ? (p.audit.ok ? "Audited" : "Down") : "Has site"}</span> : <span className="badge bad">None</span>}</td>
                     <td className="small" style={{ whiteSpace: "nowrap" }}>
@@ -428,7 +441,7 @@ function ProspectModal({ p, pipelines, onClose, onAudit, auditing, onUpdated }: 
             </div>
           ) : null}
           <div className="row"><Globe size={14} className="faint" /> {p.website ? <a href={p.website} target="_blank" rel="noreferrer" className="ellipsis">{p.website.replace(/^https?:\/\/(www\.)?/, "")}</a> : <span style={{ color: "var(--bad)" }}>No website</span>}</div>
-          {p.mapsUrl && <a href={p.mapsUrl} target="_blank" rel="noreferrer" className="row"><ExternalLink size={14} /> Google Maps listing</a>}
+          {p.mapsUrl && <a href={p.mapsUrl} target="_blank" rel="noreferrer" className="row"><ExternalLink size={14} /> {p.source === "osm" ? "OpenStreetMap listing" : "Google Maps listing"}</a>}
         </div>
         <div>
           <div className="faint" style={{ marginBottom: 6 }}>Why it scored {p.score}</div>

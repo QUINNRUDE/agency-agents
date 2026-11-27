@@ -13,7 +13,8 @@ import { getSettings, publicSettings, saveSettings } from "./config.ts";
 import { activeDemo, crm, demoDataOn, localWorkspace, testGhl } from "./crm/index.ts";
 import { CrmError, SEND_CHANNELS, type Contact, type ContactInput, type Message, type Opportunity, type Pipeline } from "./crm/types.ts";
 import { auditWebsite, scoreProspect, searchBusinesses } from "./prospect.ts";
-import { apifyUsage, mergeProspects, PRICE_PER_PLACE, recentLeadJobs, refreshLeadJob, startLeadSearch } from "./leadFinder.ts";
+import { apifyUsage, mergeProspects, PRICE_PER_PLACE, recentLeadJobs, refreshLeadJob, startContactScan, startLeadSearch } from "./leadFinder.ts";
+import { searchOsm } from "./osm.ts";
 import { localDb, uid, type SavedView, type CallLog, type CallOutcome, type Prospect, type SiteAudit } from "./store.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -729,6 +730,13 @@ app.post(
   route(async (req) => {
     const b = req.body ?? {};
     const s = getSettings();
+    // Free: OpenStreetMap, no key. Its leads' websites are then checked for emails in the background.
+    if (b.source === "free") {
+      const { prospects, area } = await searchOsm({ niche: b.niche, location: b.location, max: b.maxResults });
+      const merged = mergeProspects(prospects);
+      const job = startContactScan(merged, String(b.niche ?? ""), String(b.location ?? ""));
+      return { prospects: merged, sample: false, source: "osm", area, ...(job ? { job } : {}) };
+    }
     // Apify (Google Maps, free monthly credit) runs in the background; Google Places answers right away.
     const useApify = b.source === "apify" || (b.source !== "google" && Boolean(s.apifyToken) && !s.googlePlacesApiKey);
     if (useApify) {

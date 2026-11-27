@@ -281,6 +281,33 @@ async function scanContacts(jobId: string): Promise<void> {
   }
 }
 
+/** Checks the websites of leads found elsewhere (OpenStreetMap, Google Places) for contact details, in the background. */
+export function startContactScan(prospects: Prospect[], niche: string, location: string): LeadJob | null {
+  const toCheck = prospects.filter((p) => p.website && !p.audit);
+  if (!toCheck.length) return null;
+  const job: LeadJob = {
+    id: uid("job"),
+    niche,
+    location,
+    max: prospects.length,
+    runId: "",
+    datasetId: "",
+    status: "finding-contacts",
+    startedAt: new Date().toISOString(),
+    error: "",
+    found: prospects.length,
+    contactsToCheck: toCheck.length,
+    contactsChecked: 0,
+    emailsFound: prospects.filter((p) => p.email).length,
+    prospectIds: prospects.map((p) => p.id),
+    estimateUsd: 0,
+    costUsd: 0,
+  };
+  jobs.save(job);
+  void scanContacts(job.id);
+  return job;
+}
+
 /** Moves a job along and returns it with its leads so far. */
 export async function refreshLeadJob(id: string): Promise<{ job: LeadJob; prospects: Prospect[] }> {
   const job = jobs.get(id);
