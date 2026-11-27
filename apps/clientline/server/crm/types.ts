@@ -17,6 +17,26 @@ export interface Contact {
   dateAdded: string; // ISO
   lastActivity: string | null; // ISO
   dnd: boolean;
+  assignedTo: string; // user id ("" = unassigned)
+  customFields: CustomFieldValue[];
+}
+
+export interface CustomFieldValue {
+  id: string;
+  value: string;
+}
+
+export interface CustomField {
+  id: string;
+  name: string;
+  dataType: string; // TEXT, LARGE_TEXT, NUMERICAL, MONETORY, DATE, SINGLE_OPTIONS, ...
+  options: string[];
+}
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
 }
 
 export interface ContactInput {
@@ -30,6 +50,8 @@ export interface ContactInput {
   state?: string;
   source?: string;
   tags?: string[];
+  assignedTo?: string;
+  customFields?: CustomFieldValue[];
 }
 
 export interface Stage {
@@ -84,12 +106,16 @@ export interface Task {
   body: string;
   dueDate: string;
   completed: boolean;
+  assignedTo: string;
+  contactName: string;
 }
 
 export interface TaskInput {
   title: string;
   body?: string;
   dueDate: string;
+  assignedTo?: string;
+  completed?: boolean;
 }
 
 export interface Appointment {
@@ -134,19 +160,31 @@ export interface Crm {
   getContact(id: string): Promise<Contact | null>;
   createContact(input: ContactInput): Promise<Contact>;
   updateContact(id: string, input: ContactInput): Promise<Contact>;
+  deleteContact(id: string): Promise<void>;
   addTags(id: string, tags: string[]): Promise<void>;
+  removeTags(id: string, tags: string[]): Promise<void>;
+
+  listUsers(): Promise<User[]>;
+  listCustomFields(): Promise<CustomField[]>;
 
   listPipelines(): Promise<Pipeline[]>;
   listOpportunities(pipelineId?: string): Promise<Opportunity[]>;
   createOpportunity(input: OpportunityInput): Promise<Opportunity>;
   updateOpportunity(id: string, input: OpportunityInput): Promise<Opportunity>;
+  deleteOpportunity(id: string): Promise<void>;
 
   listNotes(contactId: string): Promise<Note[]>;
   addNote(contactId: string, body: string): Promise<Note>;
+  updateNote(contactId: string, noteId: string, body: string): Promise<Note>;
+  deleteNote(contactId: string, noteId: string): Promise<void>;
 
   listTasks(contactId: string): Promise<Task[]>;
   addTask(contactId: string, input: TaskInput): Promise<Task>;
   completeTask(contactId: string, taskId: string, completed: boolean): Promise<void>;
+  updateTask(contactId: string, taskId: string, input: Partial<TaskInput>): Promise<Task>;
+  deleteTask(contactId: string, taskId: string): Promise<void>;
+  /** Every task in the account (open first). */
+  listAllTasks(opts: { completed?: boolean; limit?: number }): Promise<Task[]>;
 
   listAppointments(fromIso: string, toIso: string): Promise<Appointment[]>;
 

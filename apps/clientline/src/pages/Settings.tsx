@@ -136,7 +136,7 @@ export function Settings() {
             <div className="stack">
               <ol className="steps">
                 <li>In GoHighLevel, open the sub-account → <b>Settings → Private Integrations</b> → <b>Create new integration</b>.</li>
-                <li>Enable scopes: contacts (read/write), opportunities (read/write), calendars & calendar events (read), conversations & conversation messages (read/write), locations (read).</li>
+                <li>Enable scopes: contacts (read/write), opportunities (read/write), calendars & calendar events (read), conversations & conversation messages (read/write), locations (read). Optional, for owners, custom fields and the all-tasks list: users, custom fields and location tasks (read).</li>
                 <li>Copy the token, and copy the <b>Location ID</b> from Settings → Business Profile (or the URL: <code>/location/&lt;id&gt;/</code>).</li>
               </ol>
               <div className="grid-2">

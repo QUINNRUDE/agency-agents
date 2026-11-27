@@ -9,9 +9,10 @@ A client command center built on the Agency Agents roster. Use it to find new cl
 | Area | What you get |
 |---|---|
 | **Overview** | Open pipeline and weighted forecast, 30-day wins, 90-day win rate, lead flow, calls and connect rate, a stage funnel, deals going cold, lead sources, today's GHL appointments, follow-ups due |
-| **Clients** | Searchable, sortable, filterable contact table (stage, source, tag), bulk tagging, CSV export, new contact + deal in one step |
-| **Client profile** | Contact info, tasks, deals with one-click stage moves and won/lost, a merged activity timeline (notes, calls, SMS/email), notes, SMS & email sending, and agent playbooks |
-| **Pipeline** | Drag-and-drop kanban per GHL pipeline, column totals, idle-days warnings, AI pipeline review |
+| **Clients (CRM)** | People and Companies views. Smart views (new this week, hot, open deals, customers, going cold, unassigned) plus your own saved views. Filters for stage, owner, source, tag and inactivity. Bulk actions: add/remove tag, assign owner, create deals, export, delete. CSV import with column mapping and duplicate skipping. A duplicate finder (shared email, phone, or name + company) |
+| **Client profile** | Contact info, owner, GHL custom fields (typed editors for text, money, date and dropdown), removable tags, deals (create, edit, move stage, won/lost, delete), tasks (create, assign, edit, complete, delete), a merged activity timeline with editable notes, SMS & email sending, and agent playbooks |
+| **Tasks** | Every task in the account in one list: overdue, today, next 7 days, later, completed. Filter by owner, complete in one click, push by a day or a week, edit, assign, delete. Overdue count in the sidebar |
+| **Pipeline** | Drag-and-drop kanban per GHL pipeline, column totals, idle-days warnings, add or edit a deal from any column, AI pipeline review |
 | **Find clients** | Search local businesses by niche and city (Google Places), score each one as an opportunity, audit its website (HTTPS, speed, mobile, lead form, booking/chat widgets, tracking pixels, staleness), then add it to GHL as a tagged contact with an audit note and a deal |
 | **Calls** | A ranked call queue (follow-ups due, stage, new leads, hot tags), calling sessions that move to the next contact, a call workspace with timer and dialer, notes, a discovery checklist, objection help, and a wrap-up step that writes a note, creates a follow-up task and moves the deal in GHL. Includes call stats and history |
 | **Agents** | Every agent in this repo (283), searchable by division. You can chat with any of them, with a client's CRM history attached |
@@ -58,10 +59,10 @@ Open **Settings** in the app, or copy `.env.example` to `.env`. Values in `.env`
 
 **GoHighLevel** (the CRM)
 1. Go to Sub-account → **Settings → Private Integrations → Create new integration**.
-2. Enable these scopes: contacts (read/write), opportunities (read/write), calendars and calendar events (read), conversations and conversation messages (read/write), locations (read).
+2. Enable these scopes: contacts (read/write), opportunities (read/write), calendars and calendar events (read), conversations and conversation messages (read/write), locations (read), and for owners, custom fields and the account-wide task list: users (read), locations/customFields (read), locations/tasks (read). The last three are optional. Without them those features hide or fall back.
 3. Paste the token and your **Location ID** into Settings, then click **Test & save connection**.
 
-Clientline uses the LeadConnector API v2 (`services.leadconnectorhq.com`, `Version: 2021-07-28`). It reads and writes contacts, tags, notes, tasks, opportunities and pipelines, calendar events, and conversations (SMS/email). It backs off and retries automatically when it hits GHL rate limits.
+Clientline uses the LeadConnector API v2 (`services.leadconnectorhq.com`, `Version: 2021-07-28`). It reads and writes contacts (including owner and custom fields), tags, notes, tasks, opportunities and pipelines, calendar events, and conversations (SMS/email), and can delete contacts, deals, notes and tasks (every delete asks you to confirm first). It backs off and retries automatically when it hits GHL rate limits.
 
 **Claude** (the agents): add an Anthropic API key. The default model is Claude Opus 5.5, and you can switch models in Settings. Responses stream into the UI.
 

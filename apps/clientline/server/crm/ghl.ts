@@ -10,6 +10,8 @@ import {
   type ContactQuery,
   type Crm,
   type CrmInfo,
+  type CustomField,
+  type User,
   type Message,
   type Note,
   type Opportunity,
@@ -65,6 +67,29 @@ function toContact(raw: unknown): Contact {
     dateAdded: iso(c.dateAdded),
     lastActivity: iso(c.lastActivity) || iso(c.dateUpdated) || null,
     dnd: Boolean(c.dnd),
+    assignedTo: str(c.assignedTo),
+    customFields: arr(c.customFields ?? c.customField)
+      .map((f) => {
+        const fo = obj(f);
+        const v = fo.value ?? fo.field_value ?? fo.fieldValue;
+        return { id: str(fo.id), value: Array.isArray(v) ? v.map(str).join(", ") : str(v) };
+      })
+      .filter((f) => f.id),
+  };
+}
+
+function toTask(raw: unknown, contactId?: string): Task {
+  const t = obj(raw);
+  const cd = obj(t.contactDetails);
+  return {
+    id: str(t.id) || str(t._id),
+    contactId: contactId || str(t.contactId),
+    title: str(t.title),
+    body: str(t.body),
+    dueDate: iso(t.dueDate),
+    completed: Boolean(t.completed),
+    assignedTo: str(t.assignedTo),
+    contactName: [str(cd.firstName), str(cd.lastName)].filter(Boolean).join(" ").replace(/\b\w/g, (m) => m.toUpperCase()),
   };
 }
 
@@ -210,7 +235,7 @@ export class GhlCrm implements Crm {
   }
 
   async updateContact(id: string, input: ContactInput): Promise<Contact> {
-    const data = await this.request<Json>("PUT", `/contacts/${encodeURIComponent(id)}`, clean(input));
+    const data = await this.request<Json>("PUT", `/contacts/${encodeURIComponent(id)}`, clean(input, true));
     this.bust("contacts:");
     return toContact(data.contact);
   }
@@ -218,6 +243,58 @@ export class GhlCrm implements Crm {
   async addTags(id: string, tags: string[]): Promise<void> {
     await this.request("POST", `/contacts/${encodeURIComponent(id)}/tags`, { tags });
     this.bust("contacts:");
+  }
+
+  async removeTags(id: string, tags: string[]): Promise<void> {
+    await this.request("DELETE", `/contacts/${encodeURIComponent(id)}/tags`, { tags });
+    this.bust("contacts:");
+  }
+
+  async deleteContact(id: string): Promise<void> {
+    await this.request("DELETE", `/contacts/${encodeURIComponent(id)}`);
+    this.bust("contacts:");
+    this.bust("opps:");
+    this.bust("tasks:");
+  }
+
+  async listUsers(): Promise<User[]> {
+    return this.cached("users", 300_000, async () => {
+      try {
+        const data = await this.request<Json>("GET", `/users/?locationId=${encodeURIComponent(this.locationId)}`);
+        return arr(data.users).map((u) => {
+          const uo = obj(u);
+          return { id: str(uo.id), name: str(uo.name) || [str(uo.firstName), str(uo.lastName)].filter(Boolean).join(" ") || str(uo.email), email: str(uo.email) };
+        });
+      } catch (err) {
+        // users.readonly is optional: without it, ownership just isn't shown.
+        if (err instanceof CrmError && err.status === 403) return [];
+        throw err;
+      }
+    });
+  }
+
+  async listCustomFields(): Promise<CustomField[]> {
+    return this.cached("customFields", 300_000, async () => {
+      try {
+        const data = await this.request<Json>("GET", `/locations/${encodeURIComponent(this.locationId)}/customFields?model=contact`);
+        return arr(data.customFields)
+          .map((f) => {
+            const fo = obj(f);
+            return {
+              id: str(fo.id),
+              name: str(fo.name),
+              dataType: str(fo.dataType) || "TEXT",
+              options: arr(fo.picklistOptions ?? fo.options).map((o) => (typeof o === "string" ? o : str(obj(o).label) || str(obj(o).value))).filter(Boolean),
+              model: str(fo.model),
+            };
+          })
+          .filter((f) => f.id && (!f.model || f.model === "contact"))
+          .map(({ model: _m, ...f }) => f);
+      } catch (err) {
+        if (err instanceof CrmError && err.status === 403) return [];
+        throw err;
+      }
+    });
   }
 
   async listPipelines(): Promise<Pipeline[]> {
@@ -280,6 +357,11 @@ export class GhlCrm implements Crm {
     return toOpportunity(data.opportunity);
   }
 
+  async deleteOpportunity(id: string): Promise<void> {
+    await this.request("DELETE", `/opportunities/${encodeURIComponent(id)}`);
+    this.bust("opps:");
+  }
+
   async listNotes(contactId: string): Promise<Note[]> {
     const data = await this.request<Json>("GET", `/contacts/${encodeURIComponent(contactId)}/notes`);
     return arr(data.notes)
@@ -296,19 +378,19 @@ export class GhlCrm implements Crm {
     return { id: str(n.id), contactId, body: str(n.body) || body, dateAdded: iso(n.dateAdded) || new Date().toISOString() };
   }
 
+  async updateNote(contactId: string, noteId: string, body: string): Promise<Note> {
+    const data = await this.request<Json>("PUT", `/contacts/${encodeURIComponent(contactId)}/notes/${encodeURIComponent(noteId)}`, { body });
+    const n = obj(data.note);
+    return { id: noteId, contactId, body: str(n.body) || body, dateAdded: iso(n.dateAdded) || new Date().toISOString() };
+  }
+
+  async deleteNote(contactId: string, noteId: string): Promise<void> {
+    await this.request("DELETE", `/contacts/${encodeURIComponent(contactId)}/notes/${encodeURIComponent(noteId)}`);
+  }
+
   async listTasks(contactId: string): Promise<Task[]> {
     const data = await this.request<Json>("GET", `/contacts/${encodeURIComponent(contactId)}/tasks`);
-    return arr(data.tasks).map((t) => {
-      const to = obj(t);
-      return {
-        id: str(to.id),
-        contactId,
-        title: str(to.title),
-        body: str(to.body),
-        dueDate: iso(to.dueDate),
-        completed: Boolean(to.completed),
-      };
-    });
+    return arr(data.tasks).map((t) => toTask(t, contactId));
   }
 
   async addTask(contactId: string, input: TaskInput): Promise<Task> {
@@ -317,20 +399,71 @@ export class GhlCrm implements Crm {
       body: input.body ?? "",
       dueDate: new Date(input.dueDate).toISOString(),
       completed: false,
+      ...(input.assignedTo ? { assignedTo: input.assignedTo } : {}),
     });
-    const t = obj(data.task);
-    return {
-      id: str(t.id),
-      contactId,
-      title: str(t.title) || input.title,
-      body: str(t.body),
-      dueDate: iso(t.dueDate) || input.dueDate,
-      completed: false,
-    };
+    this.bust("tasks:");
+    const t = toTask(data.task, contactId);
+    return { ...t, title: t.title || input.title, dueDate: t.dueDate || input.dueDate, assignedTo: t.assignedTo || input.assignedTo || "" };
   }
 
   async completeTask(contactId: string, taskId: string, completed: boolean): Promise<void> {
     await this.request("PUT", `/contacts/${encodeURIComponent(contactId)}/tasks/${encodeURIComponent(taskId)}/completed`, { completed });
+    this.bust("tasks:");
+  }
+
+  async updateTask(contactId: string, taskId: string, input: Partial<TaskInput>): Promise<Task> {
+    const body: Json = {};
+    if (input.title !== undefined) body.title = input.title;
+    if (input.body !== undefined) body.body = input.body;
+    if (input.dueDate) body.dueDate = new Date(input.dueDate).toISOString();
+    if (input.assignedTo !== undefined) body.assignedTo = input.assignedTo || undefined;
+    if (input.completed !== undefined) body.completed = input.completed;
+    const data = await this.request<Json>("PUT", `/contacts/${encodeURIComponent(contactId)}/tasks/${encodeURIComponent(taskId)}`, body);
+    this.bust("tasks:");
+    return toTask(data.task, contactId);
+  }
+
+  async deleteTask(contactId: string, taskId: string): Promise<void> {
+    await this.request("DELETE", `/contacts/${encodeURIComponent(contactId)}/tasks/${encodeURIComponent(taskId)}`);
+    this.bust("tasks:");
+  }
+
+  async listAllTasks(opts: { completed?: boolean; limit?: number }): Promise<Task[]> {
+    const limit = Math.min(opts.limit ?? 500, 1000);
+    return this.cached(`tasks:${opts.completed ?? "any"}:${limit}`, 30_000, async () => {
+      let tasks: Task[];
+      try {
+        // Location-wide task search.
+        tasks = [];
+        for (let skip = 0; skip < limit; skip += 100) {
+          const data = await this.request<Json>("POST", `/locations/${encodeURIComponent(this.locationId)}/tasks/search`, {
+            ...(opts.completed !== undefined ? { completed: opts.completed } : {}),
+            limit: 100,
+            skip,
+          });
+          const batch = arr(data.tasks).map((t) => toTask(t));
+          tasks.push(...batch);
+          if (batch.length < 100) break;
+        }
+      } catch (err) {
+        if (err instanceof CrmError && err.status === 401) throw err;
+        // Fallback for tokens without location task search: scan recently active contacts.
+        const contacts = (await this.listContacts({ limit: 200 })).slice(0, 150);
+        tasks = [];
+        for (let i = 0; i < contacts.length; i += 5) {
+          const chunk = contacts.slice(i, i + 5);
+          const lists = await Promise.all(chunk.map((c) => this.listTasks(c.id).catch(() => [] as Task[])));
+          lists.forEach((l, j) => tasks.push(...l.map((t) => ({ ...t, contactName: chunk[j].name }))));
+        }
+        if (opts.completed !== undefined) tasks = tasks.filter((t) => t.completed === opts.completed);
+      }
+      // Fill in contact names the search didn't include.
+      if (tasks.some((t) => !t.contactName)) {
+        const byId = new Map((await this.listContacts({ limit: 2000 })).map((c) => [c.id, c.name]));
+        tasks = tasks.map((t) => ({ ...t, contactName: t.contactName || byId.get(t.contactId) || "" }));
+      }
+      return tasks.slice(0, limit);
+    });
   }
 
   async listAppointments(fromIso: string, toIso: string): Promise<Appointment[]> {
@@ -406,10 +539,15 @@ export class GhlCrm implements Crm {
   }
 }
 
-function clean(input: ContactInput): Json {
+function clean(input: ContactInput, keepEmpty = false): Json {
   const out: Json = {};
   for (const [k, v] of Object.entries(input)) {
-    if (v === undefined || v === "") continue;
+    // GHL validates email/phone formats, so a blank one is left unchanged rather than sent.
+    if (v === undefined || (v === "" && (!keepEmpty || k === "email" || k === "phone"))) continue;
+    if (k === "customFields" && Array.isArray(v)) {
+      out.customFields = v.map((f) => ({ id: f.id, field_value: f.value }));
+      continue;
+    }
     out[k] = v;
   }
   return out;

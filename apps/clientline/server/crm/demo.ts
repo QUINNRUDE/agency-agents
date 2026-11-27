@@ -9,6 +9,8 @@ import type {
   ContactQuery,
   Crm,
   CrmInfo,
+  CustomField,
+  User,
   Message,
   Note,
   Opportunity,
@@ -21,6 +23,8 @@ import type {
 import { CrmError } from "./types.ts";
 
 interface DemoDb {
+  users: User[];
+  customFields: CustomField[];
   contacts: Contact[];
   pipelines: Pipeline[];
   opportunities: Opportunity[];
@@ -60,6 +64,20 @@ const BUSINESSES: [string, string][] = [
 ];
 const CITIES: [string, string][] = [["Austin", "TX"], ["Denver", "CO"], ["Tampa", "FL"], ["Phoenix", "AZ"], ["Nashville", "TN"], ["Charlotte", "NC"], ["San Diego", "CA"], ["Raleigh", "NC"], ["Boise", "ID"], ["Columbus", "OH"]];
 const SOURCES = ["Facebook Ads", "Google Ads", "Referral", "Cold outreach", "Website form", "Clientline Finder", "LinkedIn", "Google Ads", "Referral", "Website form"];
+
+const USERS: User[] = [
+  { id: "us_1", name: "Alex Morgan", email: "alex@youragency.com" },
+  { id: "us_2", name: "Jamie Lee", email: "jamie@youragency.com" },
+  { id: "us_3", name: "Riley Park", email: "riley@youragency.com" },
+];
+
+const CUSTOM_FIELDS: CustomField[] = [
+  { id: "cf_budget", name: "Monthly marketing budget", dataType: "MONETORY", options: [] },
+  { id: "cf_provider", name: "Current marketing provider", dataType: "SINGLE_OPTIONS", options: ["None / in-house", "Freelancer", "Another agency", "Franchise corporate"] },
+  { id: "cf_decision", name: "Decision maker", dataType: "TEXT", options: [] },
+  { id: "cf_renewal", name: "Contract renewal date", dataType: "DATE", options: [] },
+  { id: "cf_goal", name: "Primary goal", dataType: "LARGE_TEXT", options: [] },
+];
 
 const NOTE_LINES = [
   "Owner handles marketing personally; time is the main constraint. Wants leads without managing an agency day to day.",
@@ -126,6 +144,13 @@ function seed(): DemoDb {
       dateAdded: ago(added),
       lastActivity: ago(Math.max(0, added - Math.floor(r() * added))),
       dnd: false,
+      assignedTo: i % 5 === 4 ? "" : USERS[i % 3].id,
+      customFields: [
+        { id: "cf_budget", value: String(1000 + (i % 6) * 750) },
+        { id: "cf_provider", value: CUSTOM_FIELDS[1].options[i % 4] },
+        ...(i % 2 === 0 ? [{ id: "cf_decision", value: i % 4 === 0 ? `${firstName} (owner)` : `${firstName} + business partner` }] : []),
+        ...(i % 3 === 0 ? [{ id: "cf_goal", value: ["More booked jobs in the slow season", "Lower cost per lead", "Fill the new location's calendar", "More 5-star reviews than the competitor"][i % 4] }] : []),
+      ],
     };
   });
 
@@ -184,6 +209,8 @@ function seed(): DemoDb {
         body: "",
         dueDate: new Date(now + (Math.floor(r() * 10) - 3) * day).toISOString(),
         completed: i % 7 === 0,
+        assignedTo: c.assignedTo,
+        contactName: c.name,
       });
     }
     messages.push({ id: `ms_${i}_o`, contactId: c.id, direction: "outbound", channel: "Sms", body: `Hi ${c.firstName}, thanks for reaching out about ${c.companyName}. Is now still a good time to chat about getting more booked jobs?`, dateAdded: ago(10 + (i % 7)) });
@@ -207,11 +234,34 @@ function seed(): DemoDb {
     });
   });
 
-  return { contacts, pipelines: [acquisition, accounts], opportunities, notes, tasks, appointments, messages };
+  return { users: USERS, customFields: CUSTOM_FIELDS, contacts, pipelines: [acquisition, accounts], opportunities, notes, tasks, appointments, messages };
 }
 
 export class DemoCrm implements Crm {
-  private db = new JsonFile<DemoDb>("demo-crm.json", seed);
+  private file = new JsonFile<DemoDb>("demo-crm.json", seed);
+  // Upgrades demo files created by earlier versions.
+  private db = {
+    read: (): DemoDb => {
+      const d = this.file.read();
+      if (!d.users) d.users = USERS;
+      if (!d.customFields) d.customFields = CUSTOM_FIELDS;
+      for (const c of d.contacts) {
+        c.assignedTo ??= "";
+        c.customFields ??= [];
+      }
+      for (const t of d.tasks) {
+        t.assignedTo ??= "";
+        t.contactName ??= d.contacts.find((c) => c.id === t.contactId)?.name ?? "";
+      }
+      return d;
+    },
+    update: (fn: (d: DemoDb) => void) => {
+      const d = this.db.read();
+      fn(d);
+      this.file.write(d);
+      return d;
+    },
+  };
 
   async info(): Promise<CrmInfo> {
     return { mode: "demo", accountName: "Demo workspace" };
@@ -249,6 +299,8 @@ export class DemoCrm implements Crm {
       dateAdded: new Date().toISOString(),
       lastActivity: new Date().toISOString(),
       dnd: false,
+      assignedTo: input.assignedTo ?? "",
+      customFields: input.customFields ?? [],
     };
     this.db.update((d) => d.contacts.push(contact));
     return contact;
@@ -259,7 +311,13 @@ export class DemoCrm implements Crm {
     this.db.update((d) => {
       const c = d.contacts.find((x) => x.id === id);
       if (!c) return;
-      Object.assign(c, Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)));
+      const { customFields, ...rest } = input;
+      Object.assign(c, Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)));
+      if (customFields) {
+        const merged = new Map(c.customFields.map((f) => [f.id, f.value]));
+        for (const f of customFields) merged.set(f.id, f.value);
+        c.customFields = [...merged].filter(([, v]) => v !== "").map(([id, value]) => ({ id, value }));
+      }
       c.name = [c.firstName, c.lastName].filter(Boolean).join(" ") || c.companyName || c.name;
       c.lastActivity = new Date().toISOString();
       out = c;
@@ -273,6 +331,31 @@ export class DemoCrm implements Crm {
       const c = d.contacts.find((x) => x.id === id);
       if (c) c.tags = [...new Set([...c.tags, ...tags])];
     });
+  }
+
+  async removeTags(id: string, tags: string[]): Promise<void> {
+    this.db.update((d) => {
+      const c = d.contacts.find((x) => x.id === id);
+      if (c) c.tags = c.tags.filter((t) => !tags.includes(t));
+    });
+  }
+
+  async deleteContact(id: string): Promise<void> {
+    this.db.update((d) => {
+      d.contacts = d.contacts.filter((c) => c.id !== id);
+      d.opportunities = d.opportunities.filter((o) => o.contactId !== id);
+      d.notes = d.notes.filter((n) => n.contactId !== id);
+      d.tasks = d.tasks.filter((t) => t.contactId !== id);
+      d.messages = d.messages.filter((m) => m.contactId !== id);
+    });
+  }
+
+  async listUsers(): Promise<User[]> {
+    return this.db.read().users;
+  }
+
+  async listCustomFields(): Promise<CustomField[]> {
+    return this.db.read().customFields;
   }
 
   async listPipelines(): Promise<Pipeline[]> {
@@ -329,6 +412,12 @@ export class DemoCrm implements Crm {
     return out;
   }
 
+  async deleteOpportunity(id: string): Promise<void> {
+    this.db.update((d) => {
+      d.opportunities = d.opportunities.filter((o) => o.id !== id);
+    });
+  }
+
   async listNotes(contactId: string): Promise<Note[]> {
     return this.db.read().notes.filter((n) => n.contactId === contactId).sort((a, b) => b.dateAdded.localeCompare(a.dateAdded));
   }
@@ -343,12 +432,39 @@ export class DemoCrm implements Crm {
     return note;
   }
 
+  async updateNote(_contactId: string, noteId: string, body: string): Promise<Note> {
+    let out: Note | undefined;
+    this.db.update((d) => {
+      const n = d.notes.find((x) => x.id === noteId);
+      if (n) n.body = body;
+      out = n;
+    });
+    if (!out) throw new CrmError("Note not found", 404);
+    return out;
+  }
+
+  async deleteNote(_contactId: string, noteId: string): Promise<void> {
+    this.db.update((d) => {
+      d.notes = d.notes.filter((n) => n.id !== noteId);
+    });
+  }
+
   async listTasks(contactId: string): Promise<Task[]> {
     return this.db.read().tasks.filter((t) => t.contactId === contactId);
   }
 
   async addTask(contactId: string, input: TaskInput): Promise<Task> {
-    const task: Task = { id: uid("tk"), contactId, title: input.title, body: input.body ?? "", dueDate: new Date(input.dueDate).toISOString(), completed: false };
+    const contact = this.db.read().contacts.find((c) => c.id === contactId);
+    const task: Task = {
+      id: uid("tk"),
+      contactId,
+      title: input.title,
+      body: input.body ?? "",
+      dueDate: new Date(input.dueDate).toISOString(),
+      completed: false,
+      assignedTo: input.assignedTo ?? contact?.assignedTo ?? "",
+      contactName: contact?.name ?? "",
+    };
     this.db.update((d) => d.tasks.push(task));
     return task;
   }
@@ -358,6 +474,37 @@ export class DemoCrm implements Crm {
       const t = d.tasks.find((x) => x.id === taskId);
       if (t) t.completed = completed;
     });
+  }
+
+  async updateTask(_contactId: string, taskId: string, input: Partial<TaskInput>): Promise<Task> {
+    let out: Task | undefined;
+    this.db.update((d) => {
+      const t = d.tasks.find((x) => x.id === taskId);
+      if (!t) return;
+      if (input.title !== undefined) t.title = input.title;
+      if (input.body !== undefined) t.body = input.body;
+      if (input.dueDate) t.dueDate = new Date(input.dueDate).toISOString();
+      if (input.assignedTo !== undefined) t.assignedTo = input.assignedTo;
+      if (input.completed !== undefined) t.completed = input.completed;
+      out = t;
+    });
+    if (!out) throw new CrmError("Task not found", 404);
+    return out;
+  }
+
+  async deleteTask(_contactId: string, taskId: string): Promise<void> {
+    this.db.update((d) => {
+      d.tasks = d.tasks.filter((t) => t.id !== taskId);
+    });
+  }
+
+  async listAllTasks(opts: { completed?: boolean; limit?: number }): Promise<Task[]> {
+    const d = this.db.read();
+    const names = new Map(d.contacts.map((c) => [c.id, c.name]));
+    return d.tasks
+      .filter((t) => opts.completed === undefined || t.completed === opts.completed)
+      .map((t) => ({ ...t, contactName: names.get(t.contactId) ?? t.contactName }))
+      .slice(0, opts.limit ?? 1000);
   }
 
   async listAppointments(fromIso: string, toIso: string): Promise<Appointment[]> {

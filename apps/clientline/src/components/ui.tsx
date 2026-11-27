@@ -161,13 +161,15 @@ export function Modal({ title, onClose, children, footer, wide }: { title: React
   );
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+/** Labelled form field. Use `group` when the children hold several controls (a <label> would forward clicks to the first one). */
+export function Field({ label, hint, children, group }: { label: string; hint?: ReactNode; children: ReactNode; group?: boolean }) {
+  const Tag = group ? "div" : "label";
   return (
-    <label className="field">
+    <Tag className="field" role={group ? "group" : undefined} aria-label={group ? label : undefined}>
       <span>{label}</span>
       {children}
       {hint && <small>{hint}</small>}
-    </label>
+    </Tag>
   );
 }
 

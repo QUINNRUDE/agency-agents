@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock, Columns3, Search, Sparkles } from "lucide-react";
+import { Clock, Columns3, Plus, Search, Sparkles, UserRound } from "lucide-react";
 import { api, type Opportunity, type Pipeline } from "../lib/api.ts";
 import { money, relTime } from "../lib/format.ts";
 import { AiPanel } from "../components/AiPanel.tsx";
 import { Card, Empty, ErrorState, LoadingRows, Modal, useAsync, useToast } from "../components/ui.tsx";
+import { DealModal } from "../components/crm.tsx";
 
 export function PipelinePage() {
   const nav = useNavigate();
@@ -16,6 +17,7 @@ export function PipelinePage() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [review, setReview] = useState(false);
+  const [deal, setDeal] = useState<Opportunity | { stageId: string } | null>(null);
   useEffect(() => {
     if (!pid && pipelines.data?.[0]) setPid(pipelines.data[0].id);
   }, [pipelines.data, pid]);
@@ -53,6 +55,7 @@ export function PipelinePage() {
         </div>
         <div className="actions">
           <button className="btn" onClick={() => setReview(true)}><Sparkles /> Pipeline review</button>
+          <button className="btn primary" onClick={() => pipeline && setDeal({ stageId: pipeline.stages[0]?.id ?? "" })} disabled={!pipeline}><Plus /> New deal</button>
         </div>
       </div>
       <div className="row wrap">
@@ -92,6 +95,7 @@ export function PipelinePage() {
                   <span className="name">{s.name}</span>
                   <span className="count">{cards.length}</span>
                   <span className="sum">{money(cards.reduce((a, o) => a + o.value, 0), true)}</span>
+                  <button className="btn sm ghost icon" style={{ width: 22, height: 22 }} aria-label={`Add deal to ${s.name}`} onClick={() => setDeal({ stageId: s.id })}><Plus /></button>
                 </div>
                 <div className="col-body">
                   {cards.map((o) => {
@@ -103,9 +107,9 @@ export function PipelinePage() {
                         draggable
                         onDragStart={(e) => (e.dataTransfer.setData("text/plain", o.id), setDragId(o.id))}
                         onDragEnd={() => setDragId(null)}
-                        onClick={() => o.contactId && nav(`/clients/${o.contactId}`)}
+                        onClick={() => setDeal(o)}
                         tabIndex={0}
-                        onKeyDown={(e) => e.key === "Enter" && o.contactId && nav(`/clients/${o.contactId}`)}
+                        onKeyDown={(e) => e.key === "Enter" && setDeal(o)}
                       >
                         <div className="t">{o.name}</div>
                         <div className="meta">
@@ -116,7 +120,19 @@ export function PipelinePage() {
                             <Clock size={11} /> {idle}d
                           </span>
                         </div>
-                        {o.contactName && <div className="meta ellipsis">{o.contactName}</div>}
+                        {o.contactName && (
+                          <div className="meta ellipsis">
+                            <button
+                              style={{ all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (o.contactId) nav(`/clients/${o.contactId}`);
+                              }}
+                            >
+                              <UserRound size={11} /> {o.contactName}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -126,6 +142,16 @@ export function PipelinePage() {
             );
           })}
         </div>
+      )}
+      {deal && pipelines.data && (
+        <DealModal
+          deal={"id" in deal ? deal : undefined}
+          pipelines={pipelines.data}
+          pipelineId={pid}
+          stageId={deal.stageId}
+          onClose={() => setDeal(null)}
+          onSaved={() => opps.reload()}
+        />
       )}
       {review && (
         <Modal title="Pipeline review" onClose={() => setReview(false)} wide>

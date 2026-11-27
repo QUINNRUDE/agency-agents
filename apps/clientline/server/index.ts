@@ -6,9 +6,9 @@ import { agentMeta, allAgents, getAgent } from "./agents.ts";
 import { PLAYBOOKS, streamAgent, testClaude } from "./ai.ts";
 import { getSettings, publicSettings, saveSettings } from "./config.ts";
 import { crm, testGhl } from "./crm/index.ts";
-import { CrmError, type Contact, type Opportunity, type Pipeline } from "./crm/types.ts";
+import { CrmError, type Contact, type ContactInput, type Opportunity, type Pipeline } from "./crm/types.ts";
 import { auditWebsite, scoreProspect, searchBusinesses } from "./prospect.ts";
-import { localDb, uid, type CallLog, type CallOutcome, type Prospect, type SiteAudit } from "./store.ts";
+import { localDb, uid, type SavedView, type CallLog, type CallOutcome, type Prospect, type SiteAudit } from "./store.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -117,7 +117,7 @@ app.get(
       res.status(404);
       return { error: "Contact not found" };
     }
-    const settled = await Promise.allSettled([c.listNotes(id), c.listTasks(id), c.listMessages(id), c.listOpportunities(), c.listPipelines()]);
+    const settled = await Promise.allSettled([c.listNotes(id), c.listTasks(id), c.listMessages(id), c.listOpportunities(), c.listPipelines(), c.listUsers(), c.listCustomFields()]);
     const val = <T,>(r: PromiseSettledResult<T>, d: T) => (r.status === "fulfilled" ? r.value : d);
     const opportunities = (val(settled[3], [] as Opportunity[]) ?? []).filter((o) => o.contactId === id);
     return {
@@ -127,6 +127,8 @@ app.get(
       messages: val(settled[2], []),
       opportunities,
       pipelines: val(settled[4], []),
+      users: val(settled[5], []),
+      customFields: val(settled[6], []),
       calls: localDb.read().calls.filter((cl) => cl.contactId === id).sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
       warnings: settled.filter((r) => r.status === "rejected").map((r) => String((r as PromiseRejectedResult).reason?.message ?? r)),
     };
@@ -134,6 +136,176 @@ app.get(
 );
 
 app.put("/api/contacts/:id", route(async (req) => crm().updateContact(param(req, "id"), req.body ?? {})));
+app.delete(
+  "/api/contacts/:id",
+  route(async (req) => {
+    await crm().deleteContact(param(req, "id"));
+    localDb.update((d) => {
+      d.calls = d.calls.filter((c) => c.contactId !== param(req, "id"));
+    });
+    return { ok: true };
+  }),
+);
+app.delete(
+  "/api/contacts/:id/tags",
+  route(async (req) => {
+    await crm().removeTags(param(req, "id"), (req.body?.tags ?? []).map(String));
+    return { ok: true };
+  }),
+);
+
+/** Owners and custom field definitions. Either can be empty if the token lacks the scope. */
+app.get(
+  "/api/meta",
+  route(async () => {
+    const [users, customFields] = await Promise.allSettled([crm().listUsers(), crm().listCustomFields()]);
+    return {
+      users: users.status === "fulfilled" ? users.value : [],
+      customFields: customFields.status === "fulfilled" ? customFields.value : [],
+    };
+  }),
+);
+
+const digits = (s: string) => s.replace(/\D/g, "").slice(-10);
+
+app.get(
+  "/api/contacts-duplicates",
+  route(async () => {
+    const contacts = await crm().listContacts({ limit: 2000 });
+    const groups = new Map<string, { reason: string; contacts: Contact[] }>();
+    const add = (key: string, reason: string, c: Contact) => {
+      const g = groups.get(key) ?? { reason, contacts: [] };
+      if (!g.contacts.some((x) => x.id === c.id)) g.contacts.push(c);
+      groups.set(key, g);
+    };
+    for (const c of contacts) {
+      if (c.email) add(`e:${c.email.toLowerCase().trim()}`, `Same email: ${c.email.toLowerCase()}`, c);
+      if (digits(c.phone).length === 10) add(`p:${digits(c.phone)}`, `Same phone: ${c.phone}`, c);
+      if (c.firstName && c.lastName && c.companyName) add(`n:${`${c.firstName} ${c.lastName} ${c.companyName}`.toLowerCase()}`, "Same name and company", c);
+    }
+    // One group per set of contacts, keeping the first reason found.
+    const seen = new Set<string>();
+    return [...groups.values()]
+      .filter((g) => g.contacts.length > 1)
+      .filter((g) => {
+        const key = g.contacts.map((c) => c.id).sort().join(",");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }),
+);
+
+app.post(
+  "/api/contacts/import",
+  route(async (req) => {
+    const rows: ContactInput[] = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 2000) : [];
+    const extraTags: string[] = (req.body?.tags ?? []).map(String).filter(Boolean);
+    const assignedTo = String(req.body?.assignedTo ?? "");
+    const skipDuplicates = req.body?.skipDuplicates !== false;
+    const existing = await crm().listContacts({ limit: 2000 });
+    const emails = new Set(existing.map((c) => c.email.toLowerCase()).filter(Boolean));
+    const phones = new Set(existing.map((c) => digits(c.phone)).filter((p) => p.length === 10));
+    const result = { created: 0, skipped: 0, failed: [] as { row: number; error: string }[] };
+    let i = 0;
+    const work = async () => {
+      while (i < rows.length) {
+        const n = i++;
+        const r = rows[n];
+        const email = (r.email ?? "").toLowerCase().trim();
+        const phone = digits(r.phone ?? "");
+        if (!email && !phone && !r.firstName && !r.lastName && !r.companyName) {
+          result.skipped++;
+          continue;
+        }
+        if (skipDuplicates && ((email && emails.has(email)) || (phone.length === 10 && phones.has(phone)))) {
+          result.skipped++;
+          continue;
+        }
+        if (email) emails.add(email);
+        if (phone.length === 10) phones.add(phone);
+        try {
+          await crm().createContact({
+            ...r,
+            source: r.source || "CSV import",
+            tags: [...new Set([...(r.tags ?? []), ...extraTags])],
+            ...(assignedTo ? { assignedTo } : {}),
+          });
+          result.created++;
+        } catch (err) {
+          result.failed.push({ row: n + 1, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+    };
+    // A few in parallel keeps well under GoHighLevel's burst limit.
+    await Promise.all([work(), work(), work()]);
+    return result;
+  }),
+);
+
+app.post(
+  "/api/contacts/bulk",
+  route(async (req) => {
+    const ids: string[] = (req.body?.ids ?? []).map(String).slice(0, 1000);
+    const action = String(req.body?.action ?? "");
+    const c = crm();
+    let pipelineStage: { pipelineId: string; stageId: string } | null = null;
+    if (action === "addToPipeline") {
+      const pl = (await c.listPipelines()).find((p) => p.id === req.body?.pipelineId);
+      if (!pl) throw new CrmError("Pick a pipeline", 400);
+      pipelineStage = { pipelineId: pl.id, stageId: String(req.body?.stageId || pl.stages[0]?.id) };
+    }
+    const contacts = action === "addToPipeline" ? new Map((await c.listContacts({ limit: 2000 })).map((x) => [x.id, x])) : null;
+    let done = 0;
+    const errors: string[] = [];
+    let i = 0;
+    const work = async () => {
+      while (i < ids.length) {
+        const id = ids[i++];
+        try {
+          if (action === "addTag") await c.addTags(id, [String(req.body.tag)]);
+          else if (action === "removeTag") await c.removeTags(id, [String(req.body.tag)]);
+          else if (action === "assign") await c.updateContact(id, { assignedTo: String(req.body.assignedTo ?? "") });
+          else if (action === "delete") await c.deleteContact(id);
+          else if (action === "addToPipeline" && pipelineStage) {
+            const ct = contacts?.get(id);
+            await c.createOpportunity({ ...pipelineStage, contactId: id, name: `${ct?.companyName || ct?.name || "New"} — Opportunity`, value: Number(req.body.value) || 0 });
+          } else throw new Error(`Unknown action ${action}`);
+          done++;
+        } catch (err) {
+          errors.push(err instanceof Error ? err.message : String(err));
+        }
+      }
+    };
+    await Promise.all([work(), work(), work()]);
+    if (action === "delete") {
+      localDb.update((d) => {
+        d.calls = d.calls.filter((cl) => !ids.includes(cl.contactId));
+      });
+    }
+    return { done, failed: errors.length, errors: [...new Set(errors)].slice(0, 5) };
+  }),
+);
+
+// ---- Saved views ----
+app.get("/api/views", route(async () => localDb.read().views));
+app.post(
+  "/api/views",
+  route(async (req) => {
+    const view: SavedView = { id: uid("vw"), name: String(req.body?.name ?? "Untitled view").slice(0, 60), filters: req.body?.filters ?? {}, createdAt: new Date().toISOString() };
+    localDb.update((d) => d.views.push(view));
+    return view;
+  }),
+);
+app.delete(
+  "/api/views/:id",
+  route(async (req) => {
+    localDb.update((d) => {
+      d.views = d.views.filter((v) => v.id !== param(req, "id"));
+    });
+    return { ok: true };
+  }),
+);
 app.post(
   "/api/contacts/:id/tags",
   route(async (req) => {
@@ -142,12 +314,41 @@ app.post(
   }),
 );
 app.post("/api/contacts/:id/notes", route(async (req) => crm().addNote(param(req, "id"), String(req.body?.body ?? ""))));
+app.put("/api/contacts/:id/notes/:noteId", route(async (req) => crm().updateNote(param(req, "id"), param(req, "noteId"), String(req.body?.body ?? ""))));
+app.delete(
+  "/api/contacts/:id/notes/:noteId",
+  route(async (req) => {
+    await crm().deleteNote(param(req, "id"), param(req, "noteId"));
+    return { ok: true };
+  }),
+);
 app.post("/api/contacts/:id/tasks", route(async (req) => crm().addTask(param(req, "id"), req.body)));
 app.put(
   "/api/contacts/:id/tasks/:taskId",
   route(async (req) => {
-    await crm().completeTask(param(req, "id"), param(req, "taskId"), Boolean(req.body?.completed));
+    const b = req.body ?? {};
+    const keys = Object.keys(b);
+    // Just ticking the box uses GHL's dedicated "completed" endpoint.
+    if (keys.length === 1 && keys[0] === "completed") {
+      await crm().completeTask(param(req, "id"), param(req, "taskId"), Boolean(b.completed));
+      return { ok: true };
+    }
+    return crm().updateTask(param(req, "id"), param(req, "taskId"), b);
+  }),
+);
+app.delete(
+  "/api/contacts/:id/tasks/:taskId",
+  route(async (req) => {
+    await crm().deleteTask(param(req, "id"), param(req, "taskId"));
     return { ok: true };
+  }),
+);
+app.get(
+  "/api/tasks",
+  route(async (req) => {
+    const status = String(req.query.status ?? "open");
+    const tasks = await crm().listAllTasks({ completed: status === "all" ? undefined : status === "completed", limit: 1000 });
+    return tasks.sort((a, b) => Number(a.completed) - Number(b.completed) || (a.dueDate || "9").localeCompare(b.dueDate || "9"));
   }),
 );
 app.post("/api/messages", route(async (req) => crm().sendMessage(req.body)));
@@ -158,6 +359,13 @@ app.get("/api/pipelines", route(async () => crm().listPipelines()));
 app.get("/api/opportunities", route(async (req) => crm().listOpportunities(req.query.pipelineId ? String(req.query.pipelineId) : undefined)));
 app.post("/api/opportunities", route(async (req) => crm().createOpportunity(req.body)));
 app.put("/api/opportunities/:id", route(async (req) => crm().updateOpportunity(param(req, "id"), req.body ?? {})));
+app.delete(
+  "/api/opportunities/:id",
+  route(async (req) => {
+    await crm().deleteOpportunity(param(req, "id"));
+    return { ok: true };
+  }),
+);
 app.get(
   "/api/appointments",
   route(async (req) => {
@@ -188,12 +396,15 @@ app.get(
     const now = Date.now();
     const startToday = new Date();
     startToday.setHours(0, 0, 0, 0);
-    const [contacts, pipelines, opps, appts] = await Promise.all([
+    const [contacts, pipelines, opps, appts, openTasks] = await Promise.all([
       c.listContacts({ limit: 1000 }),
       c.listPipelines(),
       c.listOpportunities(),
       c.listAppointments(startToday.toISOString(), new Date(startToday.getTime() + 2 * DAY).toISOString()).catch(() => []),
+      c.listAllTasks({ completed: false, limit: 1000 }).catch(() => []),
     ]);
+    const endToday = startToday.getTime() + DAY;
+    const dueTasks = openTasks.filter((tk) => tk.dueDate && new Date(tk.dueDate).getTime() < endToday).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
     const pipeline = primaryPipeline(pipelines);
     const inPipe = pipeline ? opps.filter((o) => o.pipelineId === pipeline.id) : opps;
     const open = inPipe.filter((o) => o.status === "open");
@@ -265,6 +476,9 @@ app.get(
       stale,
       appointments: appts.map((a) => ({ ...a, contactName: a.contactId ? (contactById.get(a.contactId)?.name ?? "") : "" })),
       followUps,
+      tasksDue: dueTasks.slice(0, 8),
+      tasksOverdue: dueTasks.filter((tk) => new Date(tk.dueDate).getTime() < startToday.getTime()).length,
+      tasksToday: dueTasks.filter((tk) => new Date(tk.dueDate).getTime() >= startToday.getTime()).length,
       recentCalls: [...calls].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 6),
       newestContacts: contacts.slice(0, 6),
     };

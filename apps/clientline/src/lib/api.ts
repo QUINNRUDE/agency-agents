@@ -1,8 +1,8 @@
-import type { Appointment, Contact, Message, Note, Opportunity, Pipeline, Task } from "../../server/crm/types.ts";
-import type { CallLog, CallOutcome, Prospect, SiteAudit } from "../../server/store.ts";
+import type { Appointment, Contact, CustomField, Message, Note, Opportunity, Pipeline, Task, User } from "../../server/crm/types.ts";
+import type { CallLog, CallOutcome, Prospect, SavedView, SiteAudit } from "../../server/store.ts";
 import type { AgentMeta, Agent } from "../../server/agents.ts";
 
-export type { Appointment, Contact, Message, Note, Opportunity, Pipeline, Task, CallLog, CallOutcome, Prospect, SiteAudit, AgentMeta, Agent };
+export type { Appointment, Contact, CustomField, Message, Note, Opportunity, Pipeline, Task, User, SavedView, CallLog, CallOutcome, Prospect, SiteAudit, AgentMeta, Agent };
 
 export class ApiError extends Error {
   constructor(
@@ -12,6 +12,9 @@ export class ApiError extends Error {
     super(message);
   }
 }
+
+/** Lets the sidebar refresh its overdue-task count after any task change. */
+export const TASKS_CHANGED = "clientline:tasks-changed";
 
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -26,6 +29,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   } catch {
     data = text;
   }
+  if (res.ok && method !== "GET" && /\/tasks|\/api\/calls$|\/api\/contacts\/bulk/.test(url)) window.dispatchEvent(new Event(TASKS_CHANGED));
   if (!res.ok) {
     const msg = data && typeof data === "object" && "error" in data ? String((data as { error: unknown }).error) : `Request failed (${res.status})`;
     throw new ApiError(msg, res.status);
@@ -34,6 +38,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 }
 
 export const api = {
+  del: <T,>(url: string, body?: unknown) => request<T>("DELETE", url, body),
   get: <T,>(url: string) => request<T>("GET", url),
   post: <T,>(url: string, body?: unknown) => request<T>("POST", url, body ?? {}),
   put: <T,>(url: string, body?: unknown) => request<T>("PUT", url, body ?? {}),
@@ -63,8 +68,15 @@ export interface ContactBundle {
   messages: Message[];
   opportunities: Opportunity[];
   pipelines: Pipeline[];
+  users: User[];
+  customFields: CustomField[];
   calls: CallLog[];
   warnings: string[];
+}
+
+export interface Meta {
+  users: User[];
+  customFields: CustomField[];
 }
 
 export interface QueueItem {
@@ -98,6 +110,9 @@ export interface Dashboard {
   stale: (Opportunity & { idleDays: number; stageName: string })[];
   appointments: (Appointment & { contactName: string })[];
   followUps: CallLog[];
+  tasksDue: Task[];
+  tasksOverdue: number;
+  tasksToday: number;
   recentCalls: CallLog[];
   newestContacts: Contact[];
 }

@@ -1,13 +1,21 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, CheckSquare, Globe, Mail, MapPin, MessageSquare, NotebookPen, Pencil, Phone, PhoneCall, Plus, Sparkles, Tag } from "lucide-react";
-import { api, type Contact, type ContactBundle, type Opportunity } from "../lib/api.ts";
+import { ArrowLeft, CheckSquare, Globe, ListPlus, Mail, MapPin, MessageSquare, NotebookPen, Pencil, Phone, PhoneCall, Plus, Sparkles, Tag, Trash2, X } from "lucide-react";
+import { api, type Contact, type ContactBundle, type CustomField, type Note, type Opportunity, type Task } from "../lib/api.ts";
 import { duration, longDate, money, outcomeLabel, outcomeTone, phoneDisplay, relTime, shortDate } from "../lib/format.ts";
 import { AiPanel } from "../components/AiPanel.tsx";
 import { ComposeModal } from "../components/Compose.tsx";
+import { ConfirmModal, DealModal, OwnerSelect, TaskModal } from "../components/crm.tsx";
 import { Avatar, Banner, Card, Empty, ErrorState, Field, LoadingRows, Modal, useAsync, useToast } from "../components/ui.tsx";
 
 type TabId = "activity" | "notes" | "messages" | "calls";
+
+function fieldDisplay(f: CustomField, v: string) {
+  if (!v) return "";
+  if (f.dataType === "MONETORY" && !Number.isNaN(Number(v))) return money(Number(v));
+  if (f.dataType === "DATE" && !Number.isNaN(Date.parse(v))) return longDate(new Date(v).toISOString());
+  return v;
+}
 
 export function ClientDetail() {
   const { id = "" } = useParams();
@@ -18,16 +26,19 @@ export function ClientDetail() {
   const [note, setNote] = useState("");
   const [compose, setCompose] = useState<null | { channel?: "SMS" | "Email"; subject?: string; body?: string }>(null);
   const [editing, setEditing] = useState(false);
-  const [taskOpen, setTaskOpen] = useState(false);
+  const [editingFields, setEditingFields] = useState(false);
+  const [task, setTask] = useState<Task | "new" | null>(null);
   const [tagOpen, setTagOpen] = useState(false);
-  const [dealOpen, setDealOpen] = useState(false);
+  const [deal, setDeal] = useState<Opportunity | "new" | null>(null);
+  const [editNote, setEditNote] = useState<Note | null>(null);
+  const [confirm, setConfirm] = useState<null | { kind: "contact" } | { kind: "note"; note: Note } | { kind: "task"; task: Task }>(null);
 
   const timeline = useMemo(() => {
     if (!data) return [];
     const items = [
-      ...data.notes.filter((n) => !/^Call — /.test(n.body)).map((n) => ({ kind: "note" as const, at: n.dateAdded, id: n.id, title: "Note", body: n.body })),
-      ...data.calls.map((c) => ({ kind: "call" as const, at: c.startedAt, id: c.id, title: `Call · ${outcomeLabel(c.outcome)} · ${duration(c.durationSec)}`, body: [c.notes, c.nextStep && `Next step: ${c.nextStep}`].filter(Boolean).join("\n") })),
-      ...data.messages.map((m) => ({ kind: "message" as const, at: m.dateAdded, id: m.id, title: `${m.channel} ${m.direction === "inbound" ? "received" : "sent"}`, body: m.body })),
+      ...data.notes.map((n) => ({ kind: "note" as const, at: n.dateAdded, id: n.id, title: /^Call — /.test(n.body) ? "Call note" : "Note", body: n.body, note: n })),
+      ...data.calls.map((c) => ({ kind: "call" as const, at: c.startedAt, id: c.id, title: `Call · ${outcomeLabel(c.outcome)} · ${duration(c.durationSec)}`, body: [c.notes, c.nextStep && `Next step: ${c.nextStep}`].filter(Boolean).join("\n"), note: null })),
+      ...data.messages.map((m) => ({ kind: "message" as const, at: m.dateAdded, id: m.id, title: `${m.channel} ${m.direction === "inbound" ? "received" : "sent"}`, body: m.body, note: null })),
     ];
     return items.sort((a, b) => b.at.localeCompare(a.at));
   }, [data]);
@@ -36,12 +47,22 @@ export function ClientDetail() {
   if (loading && !data) return <div className="page"><Card><LoadingRows n={8} /></Card></div>;
   if (!data) return null;
   const c = data.contact;
-  const stageName = (o: Opportunity) => data.pipelines.find((p) => p.id === o.pipelineId)?.stages.find((s) => s.id === o.stageId)?.name ?? "—";
+  const users = data.users;
+
+  // Activity hides call notes (the call entry already shows them); the Notes tab shows every note.
+  const visible =
+    tab === "activity"
+      ? timeline.filter((t) => !(t.kind === "note" && t.title === "Call note" && data.calls.length))
+      : tab === "notes"
+        ? timeline.filter((t) => t.kind === "note")
+        : tab === "calls"
+          ? timeline.filter((t) => t.kind === "call")
+          : timeline.filter((t) => t.kind === "message");
 
   const addNote = async () => {
     if (!note.trim()) return;
     try {
-      const n = await api.post<ContactBundle["notes"][number]>(`/api/contacts/${c.id}/notes`, { body: note.trim() });
+      const n = await api.post<Note>(`/api/contacts/${c.id}/notes`, { body: note.trim() });
       setData({ ...data, notes: [n, ...data.notes] });
       setNote("");
       toast("Note saved");
@@ -50,23 +71,33 @@ export function ClientDetail() {
     }
   };
 
-  const moveStage = async (o: Opportunity, stageId: string) => {
+  const updateContact = async (patch: Partial<Contact>, msg: string) => {
     try {
-      const u = await api.put<Opportunity>(`/api/opportunities/${o.id}`, { stageId });
-      setData({ ...data, opportunities: data.opportunities.map((x) => (x.id === o.id ? { ...x, ...u, stageId } : x)) });
-      toast(`Moved to ${data.pipelines.flatMap((p) => p.stages).find((s) => s.id === stageId)?.name}`);
+      const u = await api.put<Contact>(`/api/contacts/${c.id}`, patch);
+      setData({ ...data, contact: { ...c, ...u, ...patch } });
+      toast(msg);
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Could not move deal", "bad");
+      toast(e instanceof Error ? e.message : "Update failed", "bad");
     }
   };
 
-  const setStatus = async (o: Opportunity, status: Opportunity["status"]) => {
+  const removeTag = async (t: string) => {
+    setData({ ...data, contact: { ...c, tags: c.tags.filter((x) => x !== t) } });
     try {
-      await api.put(`/api/opportunities/${o.id}`, { status });
-      setData({ ...data, opportunities: data.opportunities.map((x) => (x.id === o.id ? { ...x, status } : x)) });
-      toast(`Marked ${status}`);
+      await api.del(`/api/contacts/${c.id}/tags`, { tags: [t] });
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Update failed", "bad");
+      toast(e instanceof Error ? e.message : "Could not remove tag", "bad");
+      reload();
+    }
+  };
+
+  const moveStage = async (o: Opportunity, stageId: string) => {
+    try {
+      await api.put<Opportunity>(`/api/opportunities/${o.id}`, { stageId });
+      setData({ ...data, opportunities: data.opportunities.map((x) => (x.id === o.id ? { ...x, stageId } : x)) });
+      toast(`Moved to ${data.pipelines.flatMap((p) => p.stages).find((s) => s.id === stageId)?.name}`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not move deal", "bad");
     }
   };
 
@@ -82,6 +113,8 @@ export function ClientDetail() {
 
   const tasks = [...data.tasks].sort((a, b) => Number(a.completed) - Number(b.completed) || a.dueDate.localeCompare(b.dueDate));
   const now = Date.now();
+  const fieldValue = (fid: string) => c.customFields.find((x) => x.id === fid)?.value ?? "";
+  const filledFields = data.customFields.filter((f) => fieldValue(f.id));
 
   return (
     <div className="page">
@@ -95,18 +128,30 @@ export function ClientDetail() {
           <Avatar name={c.name} size="lg" />
           <div style={{ minWidth: 0 }}>
             <h2 style={{ margin: 0, fontSize: 20, letterSpacing: "-0.02em" }}>{c.name}</h2>
-            <div className="muted">{[c.companyName, [c.city, c.state].filter(Boolean).join(", ")].filter(Boolean).join(" · ") || "No company on file"}</div>
+            <div className="muted">{[c.companyName !== c.name && c.companyName, [c.city, c.state].filter(Boolean).join(", ")].filter(Boolean).join(" · ") || "No company on file"}</div>
             <div className="row wrap" style={{ gap: 4, marginTop: 6 }}>
-              {c.tags.map((t) => <span className="tag" key={t}>{t}</span>)}
+              {c.tags.map((t) => (
+                <span className="tag" key={t} style={{ gap: 4 }}>
+                  {t}
+                  <button style={{ all: "unset", cursor: "pointer", display: "inline-flex", color: "var(--text-3)" }} onClick={() => removeTag(t)} aria-label={`Remove tag ${t}`}><X size={11} /></button>
+                </span>
+              ))}
               <button className="btn sm ghost" onClick={() => setTagOpen(true)}><Tag /> Tag</button>
             </div>
           </div>
           <div className="spacer" />
           <div className="row wrap">
+            {users.length > 0 && (
+              <label className="row small muted" style={{ gap: 6 }}>
+                Owner
+                <OwnerSelect users={users} value={c.assignedTo} onChange={(v) => updateContact({ assignedTo: v }, v ? `Assigned to ${users.find((u) => u.id === v)?.name}` : "Owner removed")} style={{ width: 160, height: 32 }} />
+              </label>
+            )}
             <button className="btn" onClick={() => setEditing(true)}><Pencil /> Edit</button>
             <button className="btn" onClick={() => setCompose({ channel: "Email" })} disabled={!c.email}><Mail /> Email</button>
             <button className="btn" onClick={() => setCompose({ channel: "SMS" })} disabled={!c.phone}><MessageSquare /> Text</button>
-            <Link className="btn primary" to={`/calls/${c.id}`} aria-disabled={!c.phone}><PhoneCall /> Call</Link>
+            <Link className="btn primary" to={`/calls/${c.id}`}><PhoneCall /> Call</Link>
+            <button className="btn ghost icon" title="Delete contact" aria-label="Delete contact" onClick={() => setConfirm({ kind: "contact" })}><Trash2 /></button>
           </div>
         </div>
       </div>
@@ -118,32 +163,34 @@ export function ClientDetail() {
               <div className="stack small" style={{ gap: 8 }}>
                 <div className="row"><Phone size={14} className="faint" /> {c.phone ? <a href={`tel:${c.phone}`} className="num">{phoneDisplay(c.phone)}</a> : <span className="faint">No phone</span>}</div>
                 <div className="row"><Mail size={14} className="faint" /> {c.email ? <a href={`mailto:${c.email}`} className="ellipsis">{c.email}</a> : <span className="faint">No email</span>}</div>
-                <div className="row"><Globe size={14} className="faint" /> {c.website ? <a href={c.website} target="_blank" rel="noreferrer" className="ellipsis">{c.website.replace(/^https?:\/\/(www\.)?/, "")}</a> : <span className="faint">No website</span>}</div>
+                <div className="row"><Globe size={14} className="faint" /> {c.website ? <a href={c.website.startsWith("http") ? c.website : `https://${c.website}`} target="_blank" rel="noreferrer" className="ellipsis">{c.website.replace(/^https?:\/\/(www\.)?/, "")}</a> : <span className="faint">No website</span>}</div>
                 <div className="row"><MapPin size={14} className="faint" /> {[c.city, c.state].filter(Boolean).join(", ") || <span className="faint">—</span>}</div>
                 <div className="faint" style={{ marginTop: 4 }}>Source: {c.source || "—"} · Added {longDate(c.dateAdded)}</div>
               </div>
             </Card>
-            <Card title="Tasks" right={<button className="btn sm ghost" onClick={() => setTaskOpen(true)}><Plus /> Add</button>} flush>
-              {tasks.length ? (
-                <div className="checklist" style={{ padding: "0 12px 10px" }}>
-                  {tasks.slice(0, 6).map((t) => (
-                    <label key={t.id} className={`check ${t.completed ? "done" : ""}`}>
-                      <input type="checkbox" checked={t.completed} onChange={(e) => toggleTask(t.id, e.target.checked)} />
-                      <span style={{ flex: 1 }}>{t.title}</span>
-                      <span className={`small ${!t.completed && new Date(t.dueDate).getTime() < now ? "" : "faint"}`} style={{ color: !t.completed && new Date(t.dueDate).getTime() < now ? "var(--bad)" : undefined }}>{shortDate(t.dueDate)}</span>
-                    </label>
+            <Card title="Details" right={data.customFields.length > 0 && <button className="btn sm ghost" onClick={() => setEditingFields(true)}><Pencil /> Edit</button>}>
+              {data.customFields.length === 0 ? (
+                <div className="faint small">No custom fields in this account. Create them in GoHighLevel → Settings → Custom Fields and they'll appear here.</div>
+              ) : filledFields.length ? (
+                <dl className="stack small" style={{ gap: 8, margin: 0 }}>
+                  {filledFields.map((f) => (
+                    <div key={f.id} style={{ display: "grid", gridTemplateColumns: "minmax(110px, 45%) 1fr", gap: 8 }}>
+                      <dt className="faint">{f.name}</dt>
+                      <dd style={{ margin: 0, overflowWrap: "anywhere" }}>{fieldDisplay(f, fieldValue(f.id))}</dd>
+                    </div>
                   ))}
-                </div>
+                  {filledFields.length < data.customFields.length && <button className="btn sm ghost" style={{ justifySelf: "start" }} onClick={() => setEditingFields(true)}>+ {data.customFields.length - filledFields.length} empty field{data.customFields.length - filledFields.length === 1 ? "" : "s"}</button>}
+                </dl>
               ) : (
-                <Empty icon={<CheckSquare />} title="No tasks" />
+                <button className="btn sm" onClick={() => setEditingFields(true)}><ListPlus /> Fill in {data.customFields.length} fields</button>
               )}
             </Card>
           </div>
 
-          <Card title="Opportunities" right={<button className="btn sm ghost" onClick={() => setDealOpen(true)}><Plus /> New deal</button>} flush>
+          <Card title="Opportunities" right={<button className="btn sm ghost" onClick={() => setDeal("new")}><Plus /> New deal</button>} flush>
             {data.opportunities.length ? (
               <table className="table">
-                <thead><tr><th>Deal</th><th>Stage</th><th>Status</th><th className="right">Value</th><th>In stage since</th><th /></tr></thead>
+                <thead><tr><th>Deal</th><th>Stage</th><th>Status</th><th className="right">Value</th><th>In stage</th><th /></tr></thead>
                 <tbody>
                   {data.opportunities.map((o) => {
                     const pl = data.pipelines.find((p) => p.id === o.pipelineId);
@@ -151,28 +198,45 @@ export function ClientDetail() {
                       <tr key={o.id}>
                         <td style={{ fontWeight: 550 }}>{o.name}<div className="faint small">{pl?.name}</div></td>
                         <td>
-                          <select className="select" style={{ height: 28, width: 170 }} value={o.stageId} onChange={(e) => moveStage(o, e.target.value)} aria-label="Stage">
-                            {pl?.stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>) ?? <option>{stageName(o)}</option>}
+                          <select className="select" style={{ height: 28, width: 160 }} value={o.stageId} onChange={(e) => moveStage(o, e.target.value)} aria-label="Stage">
+                            {pl?.stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                           </select>
                         </td>
                         <td><span className={`badge ${o.status === "won" ? "good" : o.status === "lost" ? "bad" : ""}`}>{o.status}</span></td>
                         <td className="right num">{money(o.value)}</td>
                         <td className="small muted">{relTime(o.lastStageChangeAt ?? o.updatedAt)}</td>
-                        <td>
-                          {o.status === "open" && (
-                            <div className="row" style={{ gap: 4 }}>
-                              <button className="btn sm ghost" onClick={() => setStatus(o, "won")}>Won</button>
-                              <button className="btn sm ghost" onClick={() => setStatus(o, "lost")}>Lost</button>
-                            </div>
-                          )}
-                        </td>
+                        <td><button className="btn sm ghost icon" aria-label="Edit deal" onClick={() => setDeal(o)}><Pencil /></button></td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             ) : (
-              <Empty title="No deals for this contact" />
+              <Empty title="No deals for this contact"><button className="btn sm" onClick={() => setDeal("new")}><Plus /> Create a deal</button></Empty>
+            )}
+          </Card>
+
+          <Card title="Tasks" sub={`${tasks.filter((t) => !t.completed).length} open`} right={<button className="btn sm ghost" onClick={() => setTask("new")}><Plus /> Add task</button>} flush>
+            {tasks.length ? (
+              <div className="checklist" style={{ padding: "0 12px 10px" }}>
+                {tasks.map((t) => {
+                  const overdue = !t.completed && new Date(t.dueDate).getTime() < now;
+                  return (
+                    <div key={t.id} className={`check ${t.completed ? "done" : ""}`} style={{ alignItems: "center" }}>
+                      <input type="checkbox" checked={t.completed} onChange={(e) => toggleTask(t.id, e.target.checked)} aria-label={`Complete ${t.title}`} />
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        {t.title}
+                        {t.assignedTo && users.length > 0 && <span className="faint small"> · {users.find((u) => u.id === t.assignedTo)?.name}</span>}
+                      </span>
+                      <span className="small" style={{ color: overdue ? "var(--bad)" : "var(--text-3)", whiteSpace: "nowrap" }}>{shortDate(t.dueDate)}</span>
+                      <button className="btn sm ghost icon" aria-label="Edit task" onClick={() => setTask(t)}><Pencil /></button>
+                      <button className="btn sm ghost icon" aria-label="Delete task" onClick={() => setConfirm({ kind: "task", task: t })}><Trash2 /></button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <Empty icon={<CheckSquare />} title="No tasks" />
             )}
           </Card>
 
@@ -202,16 +266,25 @@ export function ClientDetail() {
               </div>
             )}
             <div className="timeline">
-              {(tab === "activity" ? timeline : tab === "notes" ? timeline.filter((t) => t.kind === "note").concat(data.notes.filter((n) => /^Call — /.test(n.body)).map((n) => ({ kind: "note" as const, at: n.dateAdded, id: n.id, title: "Call note", body: n.body }))).sort((a, b) => b.at.localeCompare(a.at)) : tab === "calls" ? timeline.filter((t) => t.kind === "call") : timeline.filter((t) => t.kind === "message")).map((t) => (
+              {visible.map((t) => (
                 <div className="tl-item" key={`${t.kind}-${t.id}`}>
                   <span className="tl-icon">{t.kind === "call" ? <Phone /> : t.kind === "message" ? <MessageSquare /> : <NotebookPen />}</span>
                   <div style={{ minWidth: 0 }}>
-                    <div className="tl-head"><b>{t.title}</b><span>{relTime(t.at)}</span></div>
+                    <div className="tl-head">
+                      <b>{t.title}</b>
+                      <span>{relTime(t.at)}</span>
+                      {t.note && (
+                        <span style={{ marginLeft: "auto", display: "inline-flex", gap: 2 }}>
+                          <button className="btn sm ghost icon" aria-label="Edit note" onClick={() => setEditNote(t.note)}><Pencil /></button>
+                          <button className="btn sm ghost icon" aria-label="Delete note" onClick={() => setConfirm({ kind: "note", note: t.note! })}><Trash2 /></button>
+                        </span>
+                      )}
+                    </div>
                     {t.body && <div className="tl-body">{t.body}</div>}
                   </div>
                 </div>
               ))}
-              {!timeline.length && <Empty title="No activity yet" />}
+              {!visible.length && <Empty title="Nothing here yet" />}
             </div>
           </section>
         </div>
@@ -235,22 +308,72 @@ export function ClientDetail() {
       </div>
 
       {compose && <ComposeModal contact={c} initial={compose} onClose={() => setCompose(null)} onSent={reload} />}
-      {editing && <EditContact contact={c} onClose={() => setEditing(false)} onSaved={(u) => setData({ ...data, contact: u })} />}
-      {taskOpen && <NewTask contactId={c.id} onClose={() => setTaskOpen(false)} onSaved={reload} />}
+      {editing && <EditContact contact={c} onClose={() => setEditing(false)} onSaved={(u) => setData({ ...data, contact: { ...c, ...u } })} />}
+      {editingFields && <EditFields contact={c} fields={data.customFields} onClose={() => setEditingFields(false)} onSaved={(customFields) => setData({ ...data, contact: { ...c, customFields } })} />}
+      {task && <TaskModal task={task === "new" ? undefined : task} contact={c} users={users} onClose={() => setTask(null)} onSaved={reload} />}
       {tagOpen && <AddTag contactId={c.id} onClose={() => setTagOpen(false)} onSaved={reload} />}
-      {dealOpen && <NewDeal contact={c} pipelines={data.pipelines} onClose={() => setDealOpen(false)} onSaved={reload} />}
+      {deal && (
+        <DealModal
+          deal={deal === "new" ? undefined : deal}
+          contact={c}
+          pipelines={data.pipelines}
+          onClose={() => setDeal(null)}
+          onSaved={() => reload()}
+        />
+      )}
+      {editNote && <EditNote contactId={c.id} note={editNote} onClose={() => setEditNote(null)} onSaved={(n) => setData({ ...data, notes: data.notes.map((x) => (x.id === n.id ? { ...x, body: n.body } : x)) })} />}
+      {confirm?.kind === "contact" && (
+        <ConfirmModal
+          title={`Delete ${c.name}?`}
+          confirmLabel="Delete permanently"
+          onClose={() => setConfirm(null)}
+          onConfirm={async () => {
+            await api.del(`/api/contacts/${c.id}`);
+            toast(`${c.name} deleted`);
+            nav("/clients");
+          }}
+        >
+          This permanently deletes the contact from GoHighLevel, along with their notes, tasks, deals and conversations. This can't be undone.
+        </ConfirmModal>
+      )}
+      {confirm?.kind === "note" && (
+        <ConfirmModal
+          title="Delete note?"
+          onClose={() => setConfirm(null)}
+          onConfirm={async () => {
+            await api.del(`/api/contacts/${c.id}/notes/${confirm.note.id}`);
+            setData({ ...data, notes: data.notes.filter((n) => n.id !== confirm.note.id) });
+            toast("Note deleted");
+          }}
+        >
+          “{confirm.note.body.slice(0, 140)}{confirm.note.body.length > 140 ? "…" : ""}”
+        </ConfirmModal>
+      )}
+      {confirm?.kind === "task" && (
+        <ConfirmModal
+          title="Delete task?"
+          onClose={() => setConfirm(null)}
+          onConfirm={async () => {
+            await api.del(`/api/contacts/${c.id}/tasks/${confirm.task.id}`);
+            setData({ ...data, tasks: data.tasks.filter((t) => t.id !== confirm.task.id) });
+            toast("Task deleted");
+          }}
+        >
+          “{confirm.task.title}”
+        </ConfirmModal>
+      )}
     </div>
   );
 }
 
 function EditContact({ contact, onClose, onSaved }: { contact: Contact; onClose: () => void; onSaved: (c: Contact) => void }) {
   const toast = useToast();
-  const [f, setF] = useState({ firstName: contact.firstName, lastName: contact.lastName, companyName: contact.companyName, email: contact.email, phone: contact.phone, website: contact.website, city: contact.city, state: contact.state });
+  const [f, setF] = useState({ firstName: contact.firstName, lastName: contact.lastName, companyName: contact.companyName, email: contact.email, phone: contact.phone, website: contact.website, city: contact.city, state: contact.state, source: contact.source });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   const save = async () => {
     try {
       const u = await api.put<Contact>(`/api/contacts/${contact.id}`, f);
-      onSaved(u);
+      onSaved({ ...u, ...f, name: [f.firstName, f.lastName].filter(Boolean).join(" ") || u.name });
       toast("Contact updated");
       onClose();
     } catch (e) {
@@ -273,31 +396,71 @@ function EditContact({ contact, onClose, onSaved }: { contact: Contact; onClose:
         <Field label="City"><input className="input" value={f.city} onChange={set("city")} /></Field>
         <Field label="State"><input className="input" value={f.state} onChange={set("state")} /></Field>
       </div>
+      <Field label="Source"><input className="input" value={f.source} onChange={set("source")} /></Field>
     </Modal>
   );
 }
 
-export function NewTask({ contactId, onClose, onSaved, initialTitle = "" }: { contactId: string; onClose: () => void; onSaved: () => void; initialTitle?: string }) {
+function EditFields({ contact, fields, onClose, onSaved }: { contact: Contact; fields: CustomField[]; onClose: () => void; onSaved: (v: Contact["customFields"]) => void }) {
   const toast = useToast();
-  const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
-  const [title, setTitle] = useState(initialTitle);
-  const [due, setDue] = useState(tomorrow);
-  const [body, setBody] = useState("");
+  const initial = Object.fromEntries(fields.map((f) => [f.id, contact.customFields.find((x) => x.id === f.id)?.value ?? ""]));
+  const [vals, setVals] = useState<Record<string, string>>(initial);
+  const [busy, setBusy] = useState(false);
   const save = async () => {
+    setBusy(true);
+    const changed = fields.filter((f) => vals[f.id] !== initial[f.id]).map((f) => ({ id: f.id, value: vals[f.id] }));
     try {
-      await api.post(`/api/contacts/${contactId}/tasks`, { title, body, dueDate: new Date(`${due}T09:00:00`).toISOString() });
-      toast("Task created");
-      onSaved();
+      if (changed.length) await api.put(`/api/contacts/${contact.id}`, { customFields: changed });
+      onSaved(fields.map((f) => ({ id: f.id, value: vals[f.id] })).filter((x) => x.value));
+      toast(changed.length ? "Details saved" : "No changes");
       onClose();
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Could not create task", "bad");
+      toast(e instanceof Error ? e.message : "Could not save", "bad");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const input = (f: CustomField) => {
+    const v = vals[f.id] ?? "";
+    const set = (x: string) => setVals({ ...vals, [f.id]: x });
+    if (f.options.length && /OPTIONS|RADIO|DROPDOWN/i.test(f.dataType))
+      return (
+        <select className="select" value={v} onChange={(e) => set(e.target.value)}>
+          <option value="">—</option>
+          {f.options.map((o) => <option key={o}>{o}</option>)}
+          {v && !f.options.includes(v) && <option>{v}</option>}
+        </select>
+      );
+    if (f.dataType === "LARGE_TEXT") return <textarea className="textarea" rows={2} value={v} onChange={(e) => set(e.target.value)} />;
+    if (f.dataType === "DATE") return <input className="input" type="date" value={v ? new Date(v).toLocaleDateString("en-CA") : ""} onChange={(e) => set(e.target.value)} />;
+    if (f.dataType === "NUMERICAL" || f.dataType === "MONETORY") return <input className="input mono" inputMode="decimal" value={v} onChange={(e) => set(e.target.value)} />;
+    return <input className="input" value={v} onChange={(e) => set(e.target.value)} />;
+  };
+  return (
+    <Modal title="Edit details" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button></>}>
+      {fields.map((f) => (
+        <Field key={f.id} label={f.name}>{input(f)}</Field>
+      ))}
+    </Modal>
+  );
+}
+
+function EditNote({ contactId, note, onClose, onSaved }: { contactId: string; note: Note; onClose: () => void; onSaved: (n: Note) => void }) {
+  const toast = useToast();
+  const [body, setBody] = useState(note.body);
+  const save = async () => {
+    try {
+      await api.put(`/api/contacts/${contactId}/notes/${note.id}`, { body });
+      onSaved({ ...note, body });
+      toast("Note updated");
+      onClose();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not update note", "bad");
     }
   };
   return (
-    <Modal title="New task" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" onClick={save} disabled={!title.trim()}>Create task</button></>}>
-      <Field label="Task"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus /></Field>
-      <Field label="Due"><input className="input" type="date" value={due} onChange={(e) => setDue(e.target.value)} /></Field>
-      <Field label="Details"><textarea className="textarea" rows={3} value={body} onChange={(e) => setBody(e.target.value)} /></Field>
+    <Modal title="Edit note" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" onClick={save} disabled={!body.trim()}>Save</button></>}>
+      <textarea className="textarea" rows={8} value={body} onChange={(e) => setBody(e.target.value)} autoFocus />
     </Modal>
   );
 }
@@ -318,43 +481,6 @@ function AddTag({ contactId, onClose, onSaved }: { contactId: string; onClose: (
   return (
     <Modal title="Add tags" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" onClick={save} disabled={!tag.trim()}>Add</button></>}>
       <Field label="Tags" hint="Comma separated. Tags sync to GoHighLevel and can trigger workflows."><input className="input" value={tag} onChange={(e) => setTag(e.target.value)} autoFocus onKeyDown={(e) => e.key === "Enter" && save()} /></Field>
-    </Modal>
-  );
-}
-
-function NewDeal({ contact, pipelines, onClose, onSaved }: { contact: Contact; pipelines: ContactBundle["pipelines"]; onClose: () => void; onSaved: () => void }) {
-  const toast = useToast();
-  const [pipelineId, setPipelineId] = useState(pipelines[0]?.id ?? "");
-  const pl = pipelines.find((p) => p.id === pipelineId);
-  const [stageId, setStageId] = useState(pl?.stages[0]?.id ?? "");
-  const [name, setName] = useState(`${contact.companyName || contact.name} — New opportunity`);
-  const [value, setValue] = useState("");
-  const save = async () => {
-    try {
-      await api.post("/api/opportunities", { pipelineId, stageId: stageId || pl?.stages[0]?.id, contactId: contact.id, name, value: Number(value) || 0 });
-      toast("Deal created");
-      onSaved();
-      onClose();
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Could not create deal", "bad");
-    }
-  };
-  return (
-    <Modal title="New deal" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" onClick={save} disabled={!pipelineId}>Create deal</button></>}>
-      <Field label="Name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
-      <div className="grid-3">
-        <Field label="Pipeline">
-          <select className="select" value={pipelineId} onChange={(e) => (setPipelineId(e.target.value), setStageId(pipelines.find((p) => p.id === e.target.value)?.stages[0]?.id ?? ""))}>
-            {pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </Field>
-        <Field label="Stage">
-          <select className="select" value={stageId} onChange={(e) => setStageId(e.target.value)}>
-            {pl?.stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        </Field>
-        <Field label="Value ($)"><input className="input" inputMode="numeric" value={value} onChange={(e) => setValue(e.target.value)} /></Field>
-      </div>
     </Modal>
   );
 }

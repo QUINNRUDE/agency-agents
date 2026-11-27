@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowDownRight, ArrowUpRight, CalendarClock, CircleDollarSign, Flame, Phone, PhoneCall, Plus, Snowflake, Target, Telescope, Trophy, UserPlus } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, CalendarClock, CheckSquare, CircleDollarSign, Flame, Phone, PhoneCall, Plus, Snowflake, Target, Telescope, Trophy, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { api, type Dashboard } from "../lib/api.ts";
 import { money, moneyShort, outcomeLabel, outcomeTone, pct, relTime, shortDate, timeOfDay } from "../lib/format.ts";
@@ -165,26 +165,42 @@ export function Overview() {
               <Empty title="Nothing booked">Appointments from your GoHighLevel calendars show up here.</Empty>
             )}
           </Card>
-          <Card title="Follow-ups due" flush right={<Link to="/calls" className="small">Call queue →</Link>}>
+          <Card
+            title="Due today"
+            sub={data && data.tasksOverdue ? <span style={{ color: "var(--bad)" }}>{data.tasksOverdue} overdue</span> : undefined}
+            flush
+            right={<Link to="/tasks" className="small">All tasks →</Link>}
+          >
             {!data ? (
               <LoadingRows n={3} />
-            ) : data.followUps.length ? (
+            ) : data.tasksDue.length || data.followUps.length ? (
               <div className="list">
+                {data.tasksDue.map((t) => {
+                  const overdue = new Date(t.dueDate).getTime() < new Date().setHours(0, 0, 0, 0);
+                  return (
+                    <div className="list-item clickable" key={t.id} onClick={() => nav(`/clients/${t.contactId}`)}>
+                      <span className="tl-icon"><CheckSquare /></span>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="t ellipsis">{t.title}</div>
+                        <div className="s ellipsis">{t.contactName}</div>
+                      </div>
+                      <span className={`badge ${overdue ? "bad" : "warn"}`} style={{ marginLeft: "auto" }}>{overdue ? relTime(t.dueDate) : "Today"}</span>
+                    </div>
+                  );
+                })}
                 {data.followUps.map((f) => (
                   <div className="list-item clickable" key={f.id} onClick={() => nav(`/calls/${f.contactId}`)}>
-                    <Avatar name={f.contactName} />
+                    <span className="tl-icon"><Phone /></span>
                     <div style={{ minWidth: 0 }}>
-                      <div className="t ellipsis">{f.contactName}</div>
+                      <div className="t ellipsis">Call back {f.contactName}</div>
                       <div className="s ellipsis">{f.nextStep || outcomeLabel(f.outcome)}</div>
                     </div>
-                    <span className="badge warn" style={{ marginLeft: "auto" }}>
-                      {relTime(f.followUpDate)}
-                    </span>
+                    <span className="badge warn" style={{ marginLeft: "auto" }}>{relTime(f.followUpDate)}</span>
                   </div>
                 ))}
               </div>
             ) : (
-              <Empty title="You're caught up">Follow-ups you set when logging calls land here.</Empty>
+              <Empty title="You're caught up">Tasks and call follow-ups due today land here.</Empty>
             )}
           </Card>
         </div>

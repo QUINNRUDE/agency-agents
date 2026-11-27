@@ -117,9 +117,30 @@ export interface SiteAudit {
   checkedAt: string;
 }
 
+export interface SavedView {
+  id: string;
+  name: string;
+  filters: Record<string, string>;
+  createdAt: string;
+}
+
 export interface LocalDb {
   calls: CallLog[];
   prospects: Prospect[];
+  views: SavedView[];
 }
 
-export const localDb = new JsonFile<LocalDb>("local.json", () => ({ calls: [], prospects: [] }));
+const localFile = new JsonFile<LocalDb>("local.json", () => ({ calls: [], prospects: [], views: [] }));
+export const localDb = {
+  read(): LocalDb {
+    const d = localFile.read();
+    d.views ??= [];
+    return d;
+  },
+  update(fn: (d: LocalDb) => void): LocalDb {
+    const d = localDb.read();
+    fn(d);
+    localFile.write(d);
+    return d;
+  },
+};

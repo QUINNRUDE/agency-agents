@@ -7,11 +7,14 @@ const TOKEN = "pit-test-token";
 const LOC = "loc_test";
 
 const contacts = [
-  { id: "g1", firstName: "dana", lastName: "reyes", companyName: "Reyes Roofing", email: "dana@reyes.com", phone: "+15125550101", tags: ["roofer"], dateAdded: new Date(Date.now() - 3 * 864e5).toISOString(), source: "Facebook Ads", city: "Austin", state: "TX" },
+  { id: "g1", firstName: "dana", lastName: "reyes", companyName: "Reyes Roofing", email: "dana@reyes.com", phone: "+15125550101", tags: ["roofer"], assignedTo: "u1", customFields: [{ id: "cf1", value: 2500 }], dateAdded: new Date(Date.now() - 3 * 864e5).toISOString(), source: "Facebook Ads", city: "Austin", state: "TX" },
   { id: "g2", firstName: "Sam", lastName: "Ortiz", companyName: "Ortiz Dental", email: "sam@ortiz.com", phone: "+15125550102", tags: [], dateAdded: new Date(Date.now() - 20 * 864e5).toISOString(), source: "Referral" },
 ];
 const pipelines = [{ id: "p1", name: "Sales", stages: [{ id: "s1", name: "New", position: 0 }, { id: "s2", name: "Booked", position: 1 }, { id: "s3", name: "Won", position: 2 }] }];
 const opportunities = [{ id: "o1", name: "Reyes Roofing deal", pipelineId: "p1", pipelineStageId: "s1", status: "open", monetaryValue: 3000, contactId: "g1", contact: { id: "g1", name: "Dana Reyes", companyName: "Reyes Roofing" }, createdAt: new Date(Date.now() - 30 * 864e5).toISOString(), updatedAt: new Date().toISOString(), lastStageChangeAt: new Date(Date.now() - 20 * 864e5).toISOString() }];
+const tasks: Record<string, { id: string; title: string; body: string; dueDate: string; completed: boolean; assignedTo?: string }[]> = {
+  g1: [{ id: "t0", title: "Send proposal", body: "", dueDate: new Date(Date.now() - 864e5).toISOString(), completed: false, assignedTo: "u1" }],
+};
 const notes: Record<string, { id: string; body: string; dateAdded: string }[]> = { g1: [{ id: "n1", body: "Interested in ads", dateAdded: new Date().toISOString() }] };
 
 export function startMock(port: number) {
@@ -53,10 +56,66 @@ export function startMock(port: number) {
     (notes[req.params.id] ??= []).unshift(n);
     res.status(201).json({ note: n });
   });
-  app.get("/contacts/:id/tasks", (_req, res) => res.json({ tasks: [] }));
+  app.get("/contacts/:id/tasks", (req, res) => res.json({ tasks: tasks[req.params.id] ?? [] }));
   app.post("/contacts/:id/tasks", (req, res) => {
     if (!req.body.title || !req.body.dueDate) return void res.status(422).json({ message: "title and dueDate required" });
-    res.status(201).json({ task: { id: "t1", ...req.body } });
+    const t = { id: `t${Date.now()}`, completed: false, body: "", ...req.body };
+    (tasks[req.params.id] ??= []).push(t);
+    res.status(201).json({ task: t });
+  });
+  app.put("/contacts/:id/tasks/:taskId/completed", (req, res) => {
+    const t = tasks[req.params.id]?.find((x) => x.id === req.params.taskId);
+    if (!t) return void res.status(404).json({ message: "nf" });
+    t.completed = Boolean(req.body.completed);
+    res.json({ task: t });
+  });
+  app.put("/contacts/:id/tasks/:taskId", (req, res) => {
+    const t = tasks[req.params.id]?.find((x) => x.id === req.params.taskId);
+    if (!t) return void res.status(404).json({ message: "nf" });
+    Object.assign(t, req.body);
+    res.json({ task: t });
+  });
+  app.delete("/contacts/:id/tasks/:taskId", (req, res) => {
+    tasks[req.params.id] = (tasks[req.params.id] ?? []).filter((x) => x.id !== req.params.taskId);
+    res.json({ succeded: true });
+  });
+  app.post("/locations/:id/tasks/search", (req, res) => {
+    if (req.params.id !== LOC) return void res.status(422).json({ message: "bad location" });
+    const all = Object.entries(tasks).flatMap(([cid, list]) => list.map((t) => ({ _id: t.id, ...t, id: undefined, contactId: cid, contactDetails: { firstName: contacts.find((c) => c.id === cid)?.firstName, lastName: contacts.find((c) => c.id === cid)?.lastName } })));
+    const filtered = req.body.completed === undefined ? all : all.filter((t) => t.completed === req.body.completed);
+    res.json({ tasks: filtered.slice(req.body.skip ?? 0, (req.body.skip ?? 0) + (req.body.limit ?? 100)) });
+  });
+  app.get("/users/", (req, res) => (req.query.locationId === LOC ? res.json({ users: [{ id: "u1", name: "Alex Owner", email: "alex@a.com" }, { id: "u2", firstName: "Jo", lastName: "Rep", email: "jo@a.com" }] }) : res.status(422).json({ message: "locationId" })));
+  app.get("/locations/:id/customFields", (_req, res) =>
+    res.json({ customFields: [{ id: "cf1", name: "Budget", dataType: "MONETORY", model: "contact" }, { id: "cf2", name: "Provider", dataType: "SINGLE_OPTIONS", picklistOptions: ["None", "Agency"], model: "contact" }, { id: "cfo", name: "Opp field", dataType: "TEXT", model: "opportunity" }] }),
+  );
+  app.delete("/contacts/:id/tags", (req, res) => {
+    const c = contacts.find((x) => x.id === req.params.id);
+    if (!c || !Array.isArray(req.body?.tags)) return void res.status(422).json({ message: "tags required" });
+    c.tags = (c.tags as string[]).filter((t) => !req.body.tags.includes(t));
+    res.json({ tags: c.tags });
+  });
+  app.delete("/contacts/:id", (req, res) => {
+    const i = contacts.findIndex((x) => x.id === req.params.id);
+    if (i < 0) return void res.status(404).json({ message: "nf" });
+    contacts.splice(i, 1);
+    res.json({ succeded: true });
+  });
+  app.put("/contacts/:id/notes/:noteId", (req, res) => {
+    const n = notes[req.params.id]?.find((x) => x.id === req.params.noteId);
+    if (!n) return void res.status(404).json({ message: "nf" });
+    n.body = req.body.body;
+    res.json({ note: n });
+  });
+  app.delete("/contacts/:id/notes/:noteId", (req, res) => {
+    notes[req.params.id] = (notes[req.params.id] ?? []).filter((x) => x.id !== req.params.noteId);
+    res.json({ succeded: true });
+  });
+  app.delete("/opportunities/:id", (req, res) => {
+    const i = opportunities.findIndex((x) => x.id === req.params.id);
+    if (i < 0) return void res.status(404).json({ message: "nf" });
+    opportunities.splice(i, 1);
+    res.json({ succeded: true });
   });
   app.get("/opportunities/pipelines", (req, res) => (req.query.locationId === LOC ? res.json({ pipelines }) : res.status(422).json({ message: "locationId" })));
   app.get("/opportunities/search", (req, res) => (req.query.location_id === LOC ? res.json({ opportunities, meta: { total: opportunities.length } }) : res.status(422).json({ message: "location_id" })));

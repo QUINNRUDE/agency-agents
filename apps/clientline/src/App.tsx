@@ -1,12 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { BrowserRouter, Link, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { Bot, Building2, Columns3, LayoutDashboard, Moon, Phone, Search, Settings as SettingsIcon, Sun, Telescope, Users } from "lucide-react";
-import { api, type Contact, type Playbook, type Status } from "./lib/api.ts";
+import { Bot, Building2, CheckSquare, Columns3, LayoutDashboard, Moon, Phone, Search, Settings as SettingsIcon, Sun, Telescope, Users } from "lucide-react";
+import { api, TASKS_CHANGED, type Contact, type Playbook, type Status } from "./lib/api.ts";
 import { ToastProvider } from "./components/ui.tsx";
 import { Overview } from "./pages/Overview.tsx";
 import { Clients } from "./pages/Clients.tsx";
 import { ClientDetail } from "./pages/ClientDetail.tsx";
 import { PipelinePage } from "./pages/Pipeline.tsx";
+import { Tasks } from "./pages/Tasks.tsx";
 import { Prospecting } from "./pages/Prospecting.tsx";
 import { Calls } from "./pages/Calls.tsx";
 import { CallWorkspace } from "./pages/CallWorkspace.tsx";
@@ -26,6 +27,7 @@ const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/clients", label: "Clients", icon: Users },
   { to: "/pipeline", label: "Pipeline", icon: Columns3 },
+  { to: "/tasks", label: "Tasks", icon: CheckSquare },
   { to: "/prospecting", label: "Find clients", icon: Telescope },
   { to: "/calls", label: "Calls", icon: Phone },
   { to: "/agents", label: "Agents", icon: Bot },
@@ -35,6 +37,7 @@ const TITLES: Record<string, string> = {
   "": "Overview",
   clients: "Clients",
   pipeline: "Pipeline",
+  tasks: "Tasks",
   prospecting: "Find clients",
   calls: "Calls",
   agents: "Agents",
@@ -142,6 +145,17 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const seg = loc.pathname.split("/")[1] ?? "";
+  const [overdue, setOverdue] = useState(0);
+  useEffect(() => {
+    const load = () =>
+      api
+        .get<{ dueDate: string }[]>("/api/tasks?status=open")
+        .then((t) => setOverdue(t.filter((x) => x.dueDate && new Date(x.dueDate).getTime() < new Date().setHours(0, 0, 0, 0)).length))
+        .catch(() => setOverdue(0));
+    void load();
+    window.addEventListener(TASKS_CHANGED, load);
+    return () => window.removeEventListener(TASKS_CHANGED, load);
+  }, [loc.pathname, status?.crm.mode]);
   const title = TITLES[seg] ?? "Clientline";
   const mode = status?.crm.mode;
   const connected = status?.ok && mode === "ghl";
@@ -165,6 +179,7 @@ function Shell() {
         {NAV.map(({ to, label, icon: Icon, end }) => (
           <NavLink key={to} to={to} end={end} className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
             <Icon /> {label}
+            {to === "/tasks" && overdue > 0 && <span className="count" style={{ color: "#f0736a" }} title={`${overdue} overdue`}>{overdue}</span>}
           </NavLink>
         ))}
         <div className="nav-label">Account</div>
@@ -214,6 +229,7 @@ function Shell() {
             <Route path="/clients" element={<Clients />} />
             <Route path="/clients/:id" element={<ClientDetail />} />
             <Route path="/pipeline" element={<PipelinePage />} />
+            <Route path="/tasks" element={<Tasks />} />
             <Route path="/prospecting" element={<Prospecting />} />
             <Route path="/calls" element={<Calls />} />
             <Route path="/calls/:id" element={<CallWorkspace />} />
