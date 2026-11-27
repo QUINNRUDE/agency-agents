@@ -20,6 +20,7 @@ export interface Trigger {
   days?: number; // deal_idle
   outcome?: string; // call_logged
   formName?: string; // meta_lead: form name contains
+  includeProspects?: boolean; // new_contact: also enroll cold prospects (they still can't be texted without consent)
 }
 
 export type StepType = "wait" | "send" | "add_tag" | "remove_tag" | "create_task" | "move_stage";
@@ -146,6 +147,18 @@ const db = {
 
 const OPT_OUT = /^\s*(stop|stopall|stop all|unsubscribe|cancel|end|quit|opt[\s-]?out|remove me)\b/i;
 const OPTED_OUT_TAGS = ["opted-out", "dnd", "do-not-contact"];
+// Cold prospects (found with Find clients or imported as a cold list) never gave permission to be texted.
+const PROSPECT_TAGS = ["prospect", "cold-list"];
+// Any of these, or the contact messaging you first, counts as permission to text.
+const CONSENT_TAGS = ["sms-ok", "sms-consent", "opted-in"];
+
+/** A cold prospect with no permission to receive automated texts yet. */
+function noTextConsent(c: Contact): boolean {
+  const tags = c.tags.map((t) => t.toLowerCase());
+  if (!tags.some((t) => PROSPECT_TAGS.includes(t))) return false;
+  if (tags.some((t) => CONSENT_TAGS.includes(t))) return false;
+  return !db.read().watch.lastInbound[c.id]?.["*"];
+}
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
@@ -408,9 +421,11 @@ export async function fire(e: EngineEvent): Promise<number> {
   if (!targets.length) return 0;
   const contact = await crm().getContact(e.contactId).catch(() => null);
   if (!contact) return 0;
+  // "Thanks for reaching out" sequences are for people who reached out, not for cold prospects you added yourself.
+  const eligible = targets.filter((a) => !(e.type === "new_contact" && noTextConsent(contact) && !a.trigger.includeProspects));
   let n = 0;
   db.update((x) => {
-    for (const a of targets) {
+    for (const a of eligible) {
       const key = `${a.id}:${e.key}`;
       if (x.dedupe[key]) continue;
       if (x.runs.some((r) => r.automationId === a.id && r.contactId === e.contactId && r.status === "active")) continue;
@@ -793,6 +808,8 @@ async function sendStep(run: Run, a: Automation, step: Step): Promise<"next" | "
     return "next" as const;
   };
   if ((channel === "SMS" || channel === "WhatsApp") && !contact.phone) return skip("No phone number on file");
+  if ((channel === "SMS" || channel === "WhatsApp") && noTextConsent(contact))
+    return skip("No permission to text yet: this is a cold prospect. Call or email them first, and tag them sms-ok once they agree to texts (or they text you first).");
   if (channel === "Email" && !contact.email) return skip("No email address on file");
   if (channel === "FB" || channel === "IG") {
     const last = db.read().watch.lastInbound[contact.id]?.[channel];

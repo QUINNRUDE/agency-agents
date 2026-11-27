@@ -596,6 +596,7 @@ function ImportModal({ users, onClose, onDone }: { users: User[]; onClose: () =>
   const [tags, setTags] = useState("imported");
   const [owner, setOwner] = useState("");
   const [skipDupes, setSkipDupes] = useState(true);
+  const [coldList, setColdList] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ created: number; skipped: number; failed: { row: number; error: string }[] } | null>(null);
 
@@ -637,6 +638,7 @@ function ImportModal({ users, onClose, onDone }: { users: User[]; onClose: () =>
         tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
         assignedTo: owner,
         skipDuplicates: skipDupes,
+        coldList,
       });
       setResult(r);
       onDone();
@@ -725,6 +727,12 @@ function ImportModal({ users, onClose, onDone }: { users: User[]; onClose: () =>
               <input type="checkbox" checked={skipDupes} onChange={(e) => setSkipDupes(e.target.checked)} /> Skip existing emails & phones
             </label>
           </div>
+          <label className="row small" style={{ alignItems: "flex-start" }}>
+            <input type="checkbox" checked={coldList} onChange={(e) => setColdList(e.target.checked)} style={{ marginTop: 3 }} />
+            <span>
+              <b>This is a cold list</b>: these people haven't agreed to get texts from me (for example a bought or scraped list). Bloom AI will tag them <code>cold-list</code> and never text them automatically. You can still call and email them.
+            </span>
+          </label>
           {!mapped && <Banner tone="warn">Map at least one column (name, email or phone) to import.</Banner>}
         </>
       )}

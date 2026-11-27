@@ -61,7 +61,11 @@ export function startMock(port: number) {
     Object.assign(c, req.body);
     res.json({ contact: c });
   });
-  app.post("/contacts/:id/tags", (req, res) => res.status(201).json({ tags: req.body.tags }));
+  app.post("/contacts/:id/tags", (req, res) => {
+    const c = contacts.find((x) => x.id === req.params.id);
+    if (c) c.tags = [...new Set([...((c.tags as string[]) ?? []), ...(req.body.tags as string[])])];
+    res.status(201).json({ tags: req.body.tags });
+  });
   app.get("/contacts/:id/notes", (req, res) => res.json({ notes: notes[req.params.id] ?? [] }));
   app.post("/contacts/:id/notes", (req, res) => {
     const n = { id: `n${Date.now()}`, body: req.body.body, dateAdded: new Date().toISOString() };

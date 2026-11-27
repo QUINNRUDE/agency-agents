@@ -153,6 +153,42 @@ try {
     await j("PUT", "/api/automation-settings", { dryRun: false });
   });
 
+  await test("cold prospects from Find clients get no welcome text", async () => {
+    const welcome = await j("POST", "/api/automations", { name: "Welcome text", trigger: { type: "new_contact" }, steps: [{ type: "send", channel: "SMS", mode: "template", text: "Thanks for reaching out, {{first_name}}!" }] });
+    await j("PUT", `/api/automations/${welcome.id}`, { enabled: true });
+    await tick();
+    const s2 = await j("POST", "/api/prospects/search", { niche: "electricians", location: "Austin, TX", maxResults: 3 });
+    const added = await j("POST", `/api/prospects/${s2.prospects[0].id}/add`, {});
+    await tick();
+    await tick();
+    assert.equal(sent("SMS", added.contactId).length, 0);
+    const runs = await j("GET", `/api/automation-runs?automationId=${welcome.id}`);
+    assert.ok(!runs.some((r: { contactId: string }) => r.contactId === added.contactId));
+    // A real inbound lead (no prospect tag) still gets the welcome text.
+    const lead = await j("POST", "/api/contacts", { firstName: "Rosa", phone: "+15125550166", source: "Website form" });
+    await tick();
+    await tick();
+    assert.equal(sent("SMS", lead.id).length, 1);
+  });
+
+  await test("texts to a prospect are blocked until they agree (sms-ok)", async () => {
+    const nudge = await j("POST", "/api/automations", { name: "Prospect text", trigger: { type: "manual" }, steps: [{ type: "send", channel: "SMS", mode: "template", text: "Hi {{first_name}}" }] });
+    await j("PUT", `/api/automations/${nudge.id}`, { enabled: true });
+    const s3 = await j("POST", "/api/prospects/search", { niche: "painters", location: "Austin, TX", maxResults: 3 });
+    const p = s3.prospects.find((x: { phone: string }) => x.phone) ?? s3.prospects[0];
+    const added = await j("POST", `/api/prospects/${p.id}/add`, {});
+    await j("POST", `/api/automations/${nudge.id}/enroll`, { contactIds: [added.contactId] });
+    await tick();
+    assert.equal(sent("SMS", added.contactId).length, 0);
+    const log = await j("GET", `/api/automation-log?automationId=${nudge.id}`);
+    assert.equal(log[0].status, "skipped");
+    assert.match(log[0].reason, /No permission to text yet/);
+    await j("POST", `/api/contacts/${added.contactId}/tags`, { tags: ["sms-ok"] });
+    await j("POST", `/api/automations/${nudge.id}/enroll`, { contactIds: [added.contactId] });
+    await tick();
+    assert.equal(sent("SMS", added.contactId).length, 1);
+  });
+
   await test("STOP opts the contact out and nothing more is sent", async () => {
     pushInbound("g1", "SMS", "STOP");
     await tick();

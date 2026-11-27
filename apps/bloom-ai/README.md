@@ -38,6 +38,7 @@ Ready-made recipes:
 | Review request after a win | A deal moves to your won stage → asks for a review a week later |
 
 **Guardrails (always on):**
+- **No cold texting:** contacts from *Find clients* (tagged `prospect`) or imported as a cold list (`cold-list`) are skipped by "new contact" automations and never get automated texts or WhatsApp messages until they agree: they text you first, or you tag them `sms-ok`. Automated texts without consent can break US law (the TCPA) and get your number blocked by carriers. Call and email prospects instead.
 - **Opt-outs:** contacts who are DND or tagged `opted-out` are never messaged. A reply of STOP, UNSUBSCRIBE, CANCEL and similar tags the contact and removes them from every sequence.
 - **Meta's 24-hour rule:** Instagram and Messenger messages are only sent within 24 hours of the person's last DM. Outside that window the step is skipped and logged.
 - **AI handoff:** complaints, opt-outs and questions the business profile can't answer are handed to you instead of guessed at. You get a `needs-human` tag and a task.

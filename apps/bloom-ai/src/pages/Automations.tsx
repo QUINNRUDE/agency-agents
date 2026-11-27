@@ -43,6 +43,7 @@ interface Trigger {
   days?: number;
   outcome?: string;
   formName?: string;
+  includeProspects?: boolean;
 }
 type StepType = "wait" | "send" | "add_tag" | "remove_tag" | "create_task" | "move_stage";
 interface Step {
@@ -473,7 +474,7 @@ function EngineSettingsPanel({ settings, onSave }: { settings: EngineSettings; o
             <Toggle on={f.dryRun} onChange={(v) => onSave({ dryRun: v })} label="Test mode" />
           </div>
           <Banner tone="info">
-            Always on: contacts who are DND or tagged <code>opted-out</code> are never messaged; anyone who replies STOP / UNSUBSCRIBE is tagged opted-out and removed from every sequence; Instagram and Messenger DMs only go out within Meta's 24-hour window; the AI hands tricky conversations to you instead of guessing.
+            Always on: cold prospects (from Find clients or a cold list) are never texted until they agree, either by texting you first or by you tagging them <code>sms-ok</code>; contacts who are DND or tagged <code>opted-out</code> are never messaged; anyone who replies STOP / UNSUBSCRIBE is tagged opted-out and removed from every sequence; Instagram and Messenger DMs only go out within Meta's 24-hour window; the AI hands tricky conversations to you instead of guessing.
           </Banner>
         </div>
       </Card>
@@ -645,6 +646,12 @@ function Builder({ automation, pipelines, claude, onClose, onSaved }: { automati
                 {["connected", "booked", "callback", "voicemail", "no_answer", "not_interested"].map((o) => <option key={o} value={o}>{o.replace(/_/g, " ")}</option>)}
               </select>
             </Field>
+          )}
+          {a.trigger.type === "new_contact" && (
+            <label className="row small" style={{ gridColumn: "1 / -1", alignItems: "flex-start" }}>
+              <input type="checkbox" checked={Boolean(a.trigger.includeProspects)} onChange={(e) => setTrigger({ includeProspects: e.target.checked })} style={{ marginTop: 3 }} />
+              <span>Also include cold prospects (added from Find clients or a cold list). They still won't get texts until they agree, so use email and call-task steps for them.</span>
+            </label>
           )}
           {a.trigger.type === "meta_lead" && <Field label="Form name contains (optional)"><input className="input" value={a.trigger.formName ?? ""} onChange={(e) => setTrigger({ formName: e.target.value })} /></Field>}
         </div>

@@ -228,6 +228,8 @@ app.post(
     const rows: ContactInput[] = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 2000) : [];
     const extraTags: string[] = (req.body?.tags ?? []).map(String).filter(Boolean);
     const assignedTo = String(req.body?.assignedTo ?? "");
+    // A cold list (bought, scraped, or otherwise without permission) is tagged so automations never text it.
+    if (req.body?.coldList) extraTags.push("cold-list");
     const skipDuplicates = req.body?.skipDuplicates !== false;
     const existing = await crm().listContacts({ limit: 2000 });
     const emails = new Set(existing.map((c) => c.email.toLowerCase()).filter(Boolean));
