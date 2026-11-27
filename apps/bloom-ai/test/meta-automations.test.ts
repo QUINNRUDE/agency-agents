@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { calls, pushInbound, startMock } from "./mock-ghl.ts";
-import { metaCalls, startMetaMock } from "./mock-meta.ts";
+import { extraLeads, metaCalls, startMetaMock } from "./mock-meta.ts";
 
 const ghl = startMock(4541);
 const meta = startMetaMock(4542);
@@ -84,6 +84,101 @@ try {
     assert.equal(metaCalls.filter((c) => c.method === "POST" && c.path === "/v23.0/111").at(-1)?.params.daily_budget, "7500");
   });
 
+  const draft = {
+    name: "Free roof inspection",
+    adAccountId: "act_123",
+    pageId: "PAGE1",
+    instagramId: "IG1",
+    locations: [{ key: "2420379", name: "Austin", type: "city", detail: "Texas, United States", radius: 25 }, { key: "US:78701", name: "78701", type: "zip", detail: "Austin, Texas" }],
+    ageMin: 30,
+    ageMax: 65,
+    primaryText: "Free roof inspection for Austin homeowners. Tap Get quote.",
+    headline: "Free roof inspection",
+    description: "Takes 30 seconds",
+    cta: "GET_QUOTE",
+    // Bigger than the 2 MB limit on other routes: the builder route must still accept it.
+    image: { base64: `data:image/jpeg;base64,${"A".repeat(3_000_000)}`, filename: "roof photo.jpg" },
+    form: { create: { name: "Roof form", question: "What do you need help with?", askTextConsent: true, privacyUrl: "https://reyesroofing.com/privacy", websiteUrl: "https://reyesroofing.com" } },
+    dailyBudget: 25,
+    launch: false,
+  };
+  const posted = (p: string) => metaCalls.filter((c) => c.method === "POST" && c.path === `/v23.0/${p}`);
+
+  await test("campaign builder lists ad accounts, Pages and the Page's Instagram account", async () => {
+    const a = await j("GET", "/api/meta/assets");
+    assert.equal(a.connected, true);
+    assert.equal(a.adAccounts[0].id, "act_123");
+    assert.deepEqual(a.pages[0].instagram, { id: "IG1", username: "reyesroofing" });
+    assert.deepEqual(a.defaults, { adAccountId: "act_123", pageId: "PAGE1" });
+  });
+
+  await test("location search returns US cities and ZIP codes from Meta", async () => {
+    const r = await j("GET", "/api/meta/locations?q=austin");
+    assert.deepEqual(r.map((l: { key: string }) => l.key), ["2420379", "US:78701"]);
+    assert.equal(r[1].detail, "Austin, Texas, United States");
+  });
+
+  await test("a new campaign is built image → form → campaign → ad set → creative → ad, and left paused", async () => {
+    const r = await j("POST", "/api/meta/campaigns", draft);
+    assert.deepEqual([r.campaignId, r.adSetId, r.adId, r.formId, r.status], ["C1", "AS1", "AD1", "FORM_NEW", "PAUSED"]);
+    assert.equal(posted("act_123/adimages").at(-1)?.params.bytes.length, 3_000_000);
+    const form = posted("PAGE1/leadgen_forms").at(-1)?.params ?? {};
+    assert.equal(form.access_token, "PAGE-test");
+    const questions = JSON.parse(form.questions);
+    assert.deepEqual(questions.slice(0, 3).map((q: { type: string }) => q.type), ["FULL_NAME", "EMAIL", "PHONE"]);
+    assert.equal(questions.at(-1).key, "text_consent");
+    assert.equal(questions.at(-1).options[0].value, "Yes, text me");
+    assert.equal(JSON.parse(form.privacy_policy).url, "https://reyesroofing.com/privacy");
+    const camp = posted("act_123/campaigns").at(-1)?.params ?? {};
+    assert.deepEqual([camp.objective, camp.status, camp.daily_budget, camp.special_ad_categories], ["OUTCOME_LEADS", "PAUSED", "2500", "[]"]);
+    const adset = posted("act_123/adsets").at(-1)?.params ?? {};
+    assert.equal(adset.campaign_id, "C1");
+    assert.equal(adset.optimization_goal, "LEAD_GENERATION");
+    assert.equal(JSON.parse(adset.promoted_object).page_id, "PAGE1");
+    const t = JSON.parse(adset.targeting);
+    assert.deepEqual(t.geo_locations, { cities: [{ key: "2420379", radius: 25, distance_unit: "mile" }], zips: [{ key: "US:78701" }] });
+    assert.deepEqual([t.age_min, t.age_max, t.publisher_platforms], [30, 65, ["facebook", "instagram"]]);
+    const story = JSON.parse(posted("act_123/adcreatives").at(-1)?.params.object_story_spec ?? "{}");
+    assert.equal(story.instagram_user_id, "IG1");
+    assert.equal(story.link_data.image_hash, "HASH1");
+    assert.equal(story.link_data.call_to_action.value.lead_gen_form_id, "FORM_NEW");
+    assert.equal(JSON.parse(posted("act_123/ads").at(-1)?.params.creative ?? "{}").creative_id, "CR1");
+    assert.equal(posted("C1").length, 0, "a paused build never switches the campaign on");
+  });
+
+  await test("launching uses an existing form and switches the campaign on", async () => {
+    const formsBefore = posted("PAGE1/leadgen_forms").length;
+    const r = await j("POST", "/api/meta/campaigns", { ...draft, image: { hash: "HASH1" }, form: { id: "FORM1" }, instagramId: "", locations: [], launch: true });
+    assert.equal(r.status, "ACTIVE");
+    assert.equal(posted("PAGE1/leadgen_forms").length, formsBefore);
+    assert.equal(posted("C1").at(-1)?.params.status, "ACTIVE");
+    const t = JSON.parse(posted("act_123/adsets").at(-1)?.params.targeting ?? "{}");
+    assert.deepEqual([t.geo_locations, t.publisher_platforms], [{ countries: ["US"] }, ["facebook"]]);
+  });
+
+  await test("a failed step deletes the half-built campaign", async () => {
+    const r = await j("POST", "/api/meta/campaigns", { ...draft, name: "FAIL test", image: { hash: "HASH1" }, form: { id: "FORM1" } }, false);
+    assert.equal(r._status, 502);
+    assert.match(r.error, /targeting/);
+    assert.ok(metaCalls.some((c) => c.method === "DELETE" && c.path === "/v23.0/C1"));
+  });
+
+  await test("a campaign with missing pieces is refused with what to fix", async () => {
+    const r = await j("POST", "/api/meta/campaigns", { ...draft, headline: "", dailyBudget: 0, form: { create: { privacyUrl: "" } } }, false);
+    assert.equal(r._status, 400);
+    assert.match(r.error, /headline/);
+    assert.match(r.error, /privacy policy/);
+    assert.match(r.error, /at least \$1/);
+  });
+
+  await test("ad copy falls back to plain templates when Claude isn't connected", async () => {
+    const r = await j("POST", "/api/meta/ad-copy", { business: "Reyes Roofing", offer: "Free roof inspection", audience: "Homeowners", place: "Austin", cta: "GET_QUOTE" });
+    assert.equal(r.ai, false);
+    assert.equal(r.variants.length, 3);
+    assert.match(r.variants[0].primaryText, /Free roof inspection from Reyes Roofing in Austin/);
+    assert.match(r.variants[0].primaryText, /Get quote/);
+  });
+
   // Automations: seed the engine, then install recipes (template text only — no Claude here).
   const settings = await j("PUT", "/api/automation-settings", { quietStart: "00:00", quietEnd: "23:59", maxPerContactPerDay: 5 });
   await tick(); // first look: remember what already exists
@@ -112,6 +207,25 @@ try {
     assert.match((sms[0].body as { message: string }).message, /^Hi Priya! .* got your request from our ad/);
     const log = await j("GET", "/api/automation-log");
     assert.ok(log.some((l: { status: string; contactName: string }) => l.status === "sent" && l.contactName === "Priya Shah"));
+  });
+
+  await test("the lead form's texting answer tags the lead, and a \"no\" blocks automated texts", async () => {
+    const now = new Date().toISOString();
+    extraLeads.push(
+      { id: "L3", created_time: now, campaign_name: "Free roof inspection", platform: "fb", field_data: [{ name: "full_name", values: ["Omar Haddad"] }, { name: "phone_number", values: ["+15125550177"] }, { name: "text_consent", values: ["No texts, please"] }] },
+      { id: "L4", created_time: now, campaign_name: "Free roof inspection", platform: "fb", field_data: [{ name: "full_name", values: ["Lena Park"] }, { name: "phone_number", values: ["+15125550178"] }, { name: "text_consent", values: ["Yes, text me"] }] },
+    );
+    const r = await j("POST", "/api/meta/sync");
+    assert.equal(r.imported, 2);
+    const omar = (await j("GET", "/api/contacts?q=omar"))[0];
+    const lena = (await j("GET", "/api/contacts?q=lena"))[0];
+    assert.ok(omar.tags.includes("no-texts"));
+    assert.ok(lena.tags.includes("sms-ok"));
+    await tick();
+    assert.equal(sent("SMS", omar.id).length, 0);
+    assert.equal(sent("SMS", lena.id).length, 1);
+    const log = await j("GET", "/api/automation-log");
+    assert.ok(log.some((l: { contactName: string; status: string; reason: string }) => l.contactName === "Omar Haddad" && l.status === "skipped" && /No permission to text/.test(l.reason)));
   });
 
   await test("an inbound Instagram DM gets an automatic IG reply", async () => {
@@ -231,7 +345,7 @@ try {
     const p = await j("POST", "/api/broadcasts/preview", { audience: { kind: "all" }, channel: "SMS", message: "Hi {{first_name}}, we have openings next week!" });
     assert.ok(p.eligible > 0);
     assert.ok(p.excluded["Opted out / DND"] >= 1);
-    assert.ok(p.excluded["Cold prospect (no permission to text)"] >= 1);
+    assert.ok(p.excluded["No permission to text"] >= 1);
     assert.match(p.sampleText, /Reply STOP to opt out\.$/);
   });
 

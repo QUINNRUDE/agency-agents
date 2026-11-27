@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { CircleDollarSign, Eye, MousePointerClick, RefreshCw, Sparkles, Target, TrendingUp, Trophy, UserPlus, Users } from "lucide-react";
+import { CircleDollarSign, Eye, MousePointerClick, Plus, RefreshCw, Sparkles, Target, TrendingUp, Trophy, UserPlus, Users } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { money, relTime } from "../lib/format.ts";
 import { useApp } from "../App.tsx";
@@ -38,7 +38,24 @@ interface Overview {
   sync: { lastSyncAt: string; lastLeadTime: string; lastError: string };
   autoSync: boolean;
   hasPage: boolean;
+  own: boolean;
 }
+
+interface AdAccount {
+  id: string;
+  name: string;
+  currency: string;
+  active: boolean;
+}
+
+const ACCOUNT_KEY = "bloom-ad-account";
+const savedAccount = () => {
+  try {
+    return localStorage.getItem(ACCOUNT_KEY) ?? "";
+  } catch {
+    return "";
+  }
+};
 
 interface MetaLead {
   leadId: string;
@@ -58,11 +75,20 @@ export function Ads() {
   const { status } = useApp();
   const toast = useToast();
   const [range, setRange] = useState(30);
-  const ov = useAsync(() => api.get<Overview>(`/api/meta/overview?range=${range}`), [range]);
+  const [account, setAccount] = useState(savedAccount);
+  const accounts = useAsync(() => (status?.has.meta ? api.get<{ adAccounts: AdAccount[] }>("/api/meta/assets").then((r) => r.adAccounts) : Promise.resolve([] as AdAccount[])), [status?.has.meta]);
+  useEffect(() => {
+    try {
+      if (account) localStorage.setItem(ACCOUNT_KEY, account);
+    } catch {
+      /* private mode: the choice just isn't remembered */
+    }
+  }, [account]);
+  const ov = useAsync(() => api.get<Overview>(`/api/meta/overview?range=${range}${account ? `&account=${encodeURIComponent(account)}` : ""}`), [range, account]);
   const leads = useAsync(() => api.get<MetaLead[]>("/api/meta/leads"));
   const [review, setReview] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [confirm, setConfirm] = useState<Campaign | null>(null);
+  const [confirm, setConfirm] = useState<{ c: Campaign; next: "ACTIVE" | "PAUSED" } | null>(null);
   const [budgets, setBudgets] = useState<Record<string, string>>({});
 
   const d = ov.data;
@@ -123,10 +149,16 @@ export function Ads() {
               <button key={r} className={`btn ${range === r ? "on" : ""}`} onClick={() => setRange(r)}>{r}d</button>
             ))}
           </div>
+          {(accounts.data?.length ?? 0) > 1 && (
+            <select className="select" style={{ width: "auto", maxWidth: 220 }} value={account || d?.account.id || ""} onChange={(e) => setAccount(e.target.value)} aria-label="Ad account">
+              {accounts.data?.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+          )}
           <button className="btn" onClick={() => setReview(true)}><Sparkles /> AI ad review</button>
-          <button className="btn primary" onClick={sync} disabled={syncing || !status?.has.meta || !d?.hasPage} title={!d?.hasPage ? "Pick your Facebook Page in Settings → Meta Ads" : "Pull new lead-form leads into the CRM"}>
+          <button className="btn" onClick={sync} disabled={syncing || !status?.has.meta || !d?.hasPage} title={!d?.hasPage ? "Pick your Facebook Page in Settings → Meta Ads" : "Pull new lead-form leads into the CRM"}>
             <RefreshCw className={syncing ? "spin" : ""} style={syncing ? { animation: "spin 0.8s linear infinite" } : undefined} /> Sync leads
           </button>
+          <Link className="btn primary" to="/ads/new"><Plus /> New campaign</Link>
         </div>
       </div>
 
@@ -183,7 +215,7 @@ export function Ads() {
             ))}
           </div>
         ) : (
-          <div className="small muted">Connect Meta to compare real spend against the revenue in your CRM.</div>
+          <div className="small muted">{d && !d.own ? "This is a client's ad account. Their leads go to their own CRM, so revenue is tracked there, not in Bloom AI." : "Connect Meta to compare real spend against the revenue in your CRM."}</div>
         )}
         <div className="faint small" style={{ marginTop: 12 }}>Counts contacts tagged <code>meta-lead</code>, synced from lead forms, or with a Facebook / Instagram / Meta lead source. ROAS = revenue from won deals ÷ ad spend in this period.</div>
       </Card>
@@ -218,7 +250,7 @@ export function Ads() {
                   return (
                     <tr key={c.id}>
                       <td>
-                        <Toggle on={c.status === "ACTIVE"} onChange={(v) => (v ? void setStatus(c, "ACTIVE") : setConfirm(c))} label={`${c.status === "ACTIVE" ? "Pause" : "Resume"} ${c.name}`} disabled={d.sample} />
+                        <Toggle on={c.status === "ACTIVE"} onChange={(v) => setConfirm({ c, next: v ? "ACTIVE" : "PAUSED" })} label={`${c.status === "ACTIVE" ? "Pause" : "Turn on"} ${c.name}`} disabled={d.sample} />
                       </td>
                       <td style={{ maxWidth: 320 }}>
                         <div style={{ fontWeight: 600 }} className="ellipsis">{c.name}</div>
@@ -253,7 +285,9 @@ export function Ads() {
             </table>
           </div>
         ) : (
-          <Empty title="No campaigns in this ad account" />
+          <Empty title="No campaigns in this ad account">
+            <Link className="btn primary" to="/ads/new" style={{ marginTop: 8 }}><Plus /> Create your first campaign</Link>
+          </Empty>
         )}
       </Card>
 
@@ -296,14 +330,28 @@ export function Ads() {
           <AiPanel playbookIds={["ads-review"]} />
         </Modal>
       )}
-      {confirm && (
+      {confirm?.next === "PAUSED" && (
         <ConfirmModal
-          title={`Pause “${confirm.name}”?`}
+          title={`Pause “${confirm.c.name}”?`}
           confirmLabel="Pause campaign"
           onClose={() => setConfirm(null)}
-          onConfirm={() => setStatus(confirm, "PAUSED")}
+          onConfirm={() => setStatus(confirm.c, "PAUSED")}
         >
-          The campaign stops delivering on Facebook and Instagram right away. You can resume it here at any time.
+          The campaign stops delivering on Facebook and Instagram right away. You can turn it back on here at any time.
+        </ConfirmModal>
+      )}
+      {confirm?.next === "ACTIVE" && (
+        <ConfirmModal
+          title={`Turn on “${confirm.c.name}”?`}
+          confirmLabel="Turn on"
+          tone="primary"
+          onClose={() => setConfirm(null)}
+          onConfirm={() => setStatus(confirm.c, "ACTIVE")}
+        >
+          {confirm.c.dailyBudget !== null
+            ? `It starts spending up to about ${m(confirm.c.dailyBudget)} a day (${m(confirm.c.dailyBudget * 30.4)} a month).`
+            : "It starts spending its budget again."}{" "}
+          New ads run once Meta has reviewed them, usually within 24 hours.
         </ConfirmModal>
       )}
     </div>

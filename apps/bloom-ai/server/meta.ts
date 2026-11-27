@@ -8,11 +8,11 @@ import { localDb, type MetaLead } from "./store.ts";
 
 const BASE = process.env.META_API_BASE || "https://graph.facebook.com";
 
-type Json = Record<string, unknown>;
-const obj = (v: unknown): Json => (v && typeof v === "object" && !Array.isArray(v) ? (v as Json) : {});
-const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
-const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
-const num = (v: unknown) => Number(v ?? 0) || 0;
+export type Json = Record<string, unknown>;
+export const obj = (v: unknown): Json => (v && typeof v === "object" && !Array.isArray(v) ? (v as Json) : {});
+export const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+export const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
+export const num = (v: unknown) => Number(v ?? 0) || 0;
 
 export class MetaError extends Error {
   constructor(
@@ -24,14 +24,15 @@ export class MetaError extends Error {
 }
 
 function explain(code: number, message: string): string {
+  if (/terms of service|leadgen.*terms|\btos\b/i.test(message)) return "This Facebook Page hasn't accepted Meta's Lead Ads terms yet. Open facebook.com/ads/leadgen/tos while logged in as a Page admin, accept them, then try again.";
   if (code === 190) return "Meta rejected the access token (expired or revoked). Generate a new System User token in Business Settings.";
-  if (code === 10 || code === 200 || code === 294) return `Meta says this token is missing a permission: ${message}. It needs ads_read (and ads_management to pause or change budgets, leads_retrieval + pages_show_list + pages_read_engagement for lead forms).`;
+  if (code === 10 || code === 200 || code === 294) return `Meta says this token is missing a permission: ${message}. It needs ads_read (ads_management to create campaigns, pause them or change budgets; leads_retrieval, pages_show_list, pages_read_engagement and pages_manage_ads for lead forms).`;
   if (code === 4 || code === 17 || code === 613 || code === 80004) return "Meta's rate limit was hit. Wait a few minutes and try again.";
   if (code === 100) return `Meta rejected the request: ${message}`;
   return `Meta API error ${code}: ${message}`;
 }
 
-async function graph<T = Json>(path: string, params: Record<string, string> = {}, opts: { method?: "GET" | "POST"; token?: string } = {}): Promise<T> {
+export async function graph<T = Json>(path: string, params: Record<string, string> = {}, opts: { method?: "GET" | "POST" | "DELETE"; token?: string } = {}): Promise<T> {
   const s = getSettings();
   const token = opts.token ?? s.metaAccessToken;
   if (!token) throw new MetaError("Meta isn't connected. Add an access token in Settings → Meta Ads.", 400);
@@ -39,7 +40,7 @@ async function graph<T = Json>(path: string, params: Record<string, string> = {}
   const url = new URL(`${BASE}/${version}/${path.replace(/^\//, "")}`);
   const method = opts.method ?? "GET";
   let body: URLSearchParams | undefined;
-  if (method === "GET") {
+  if (method !== "POST") {
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     url.searchParams.set("access_token", token);
   } else {
@@ -71,7 +72,7 @@ export const actId = (id: string) => (id.startsWith("act_") ? id : `act_${id.rep
 
 // Meta reports budgets in the currency's minor unit; these currencies have none.
 const ZERO_DECIMAL = new Set(["JPY", "KRW", "CLP", "VND", "ISK", "PYG", "TWD", "HUF", "COP", "IDR"]);
-const minorFactor = (currency: string) => (ZERO_DECIMAL.has(currency.toUpperCase()) ? 1 : 100);
+export const minorFactor = (currency: string) => (ZERO_DECIMAL.has(currency.toUpperCase()) ? 1 : 100);
 
 const LEAD_ACTIONS = ["lead", "onsite_conversion.lead_grouped", "offsite_conversion.fb_pixel_lead", "onsite_web_lead", "leadgen_grouped"];
 function leadsFrom(actions: unknown): number {
@@ -122,20 +123,21 @@ export async function testMeta(token: string) {
   };
 }
 
-export async function metaOverview(rangeDays: number): Promise<MetaOverview> {
+export async function metaOverview(rangeDays: number, accountId = ""): Promise<MetaOverview> {
   const s = getSettings();
   const range = PRESET[rangeDays] ? rangeDays : 30;
-  if (!s.metaAccessToken || !s.metaAdAccountId) return sampleOverview(range);
-  const act = actId(s.metaAdAccountId);
+  const account = accountId || s.metaAdAccountId;
+  if (!s.metaAccessToken || !account) return sampleOverview(range);
+  const act = actId(account);
   const preset = PRESET[range];
-  const [account, totalsRes, dailyRows, campaignRows, campaignMeta] = await Promise.all([
+  const [acct, totalsRes, dailyRows, campaignRows, campaignMeta] = await Promise.all([
     graph<Json>(act, { fields: "name,currency,timezone_name" }),
     graph<Json>(`${act}/insights`, { fields: "spend,impressions,clicks,reach,ctr,cpc,cpm,frequency,actions", date_preset: preset }),
     graphAll(`${act}/insights`, { fields: "spend,impressions,clicks,actions", date_preset: preset, time_increment: "1", limit: "100" }),
     graphAll(`${act}/insights`, { level: "campaign", fields: "campaign_id,campaign_name,spend,impressions,clicks,ctr,cpm,actions", date_preset: preset, limit: "200" }),
     graphAll(`${act}/campaigns`, { fields: "id,name,status,effective_status,objective,daily_budget,lifetime_budget", limit: "200" }),
   ]);
-  const currency = str(account.currency) || "USD";
+  const currency = str(acct.currency) || "USD";
   const f = minorFactor(currency);
   const t = obj(arr(totalsRes.data)[0]);
   const leads = leadsFrom(t.actions);
@@ -164,7 +166,7 @@ export async function metaOverview(rangeDays: number): Promise<MetaOverview> {
   });
   return {
     sample: false,
-    account: { id: act, name: str(account.name), currency, timezone: str(account.timezone_name) },
+    account: { id: act, name: str(acct.name), currency, timezone: str(acct.timezone_name) },
     range,
     totals: {
       spend,
@@ -194,7 +196,7 @@ export async function updateCampaign(id: string, patch: { status?: "ACTIVE" | "P
 
 // ---- Lead Ads ---------------------------------------------------------------
 
-async function pageToken(pageId: string): Promise<string> {
+export async function pageToken(pageId: string): Promise<string> {
   const p = await graph<Json>(pageId, { fields: "access_token,name" });
   const t = str(p.access_token);
   if (!t) throw new MetaError("Couldn't get a Page token. Make sure the token's user/system user has access to this Page with pages_show_list and leads_retrieval.", 403);
@@ -208,11 +210,12 @@ export interface LeadForm {
   leads: number;
 }
 
-export async function listForms(): Promise<LeadForm[]> {
+export async function listForms(pageId = ""): Promise<LeadForm[]> {
   const s = getSettings();
-  if (!s.metaPageId) return [];
-  const token = await pageToken(s.metaPageId);
-  const data = await graph<Json>(`${s.metaPageId}/leadgen_forms`, { fields: "id,name,status,leads_count", limit: "100" }, { token });
+  const page = pageId || s.metaPageId;
+  if (!s.metaAccessToken || !page) return [];
+  const token = await pageToken(page);
+  const data = await graph<Json>(`${page}/leadgen_forms`, { fields: "id,name,status,leads_count", limit: "100" }, { token });
   return arr(data.data).map((f) => ({ id: str(obj(f).id), name: str(obj(f).name), status: str(obj(f).status), leads: num(obj(f).leads_count) }));
 }
 
@@ -230,6 +233,10 @@ const FIELD_MAP: Record<string, keyof Contact | "fullName"> = {
   company: "companyName",
   website: "website",
 };
+
+/** Field key Bloom AI gives the "Can we text you?" question on forms it creates (plus common variants). */
+export const TEXT_CONSENT_KEY = "text_consent";
+const CONSENT_QUESTION = /^(text_consent|sms_consent|sms_opt_in|can_we_text_you.*)$/i;
 
 export interface SyncResult {
   imported: number;
@@ -280,13 +287,17 @@ async function doSync(): Promise<SyncResult> {
       }
       const fields: Record<string, string> = {};
       const extra: string[] = [];
+      let textAnswer: "yes" | "no" | "" = "";
       for (const fd of arr(l.field_data).map(obj)) {
         const name = str(fd.name);
         const value = arr(fd.values).map(str).join(", ");
         const key = FIELD_MAP[name.toLowerCase()];
         if (key) fields[key] = value;
         else if (value) extra.push(`${name.replace(/_/g, " ")}: ${value}`);
+        if (CONSENT_QUESTION.test(name) && value) textAnswer = /^\s*(yes|y)\b/i.test(value) ? "yes" : "no";
       }
+      // The form's "Can we text you?" answer decides whether automations may text them.
+      const consentTags = textAnswer === "yes" ? ["sms-ok"] : textAnswer === "no" ? ["no-texts"] : [];
       if (fields.fullName && !fields.firstName) {
         const parts = fields.fullName.trim().split(/\s+/);
         fields.firstName = parts[0] ?? "";
@@ -310,7 +321,7 @@ async function doSync(): Promise<SyncResult> {
       let contactId: string;
       if (match) {
         contactId = match.id;
-        await c.addTags(contactId, ["meta-lead"]).catch(() => undefined);
+        await c.addTags(contactId, ["meta-lead", ...consentTags]).catch(() => undefined);
         result.matched++;
       } else {
         const created = await c.createContact({
@@ -323,7 +334,7 @@ async function doSync(): Promise<SyncResult> {
           state: fields.state,
           website: fields.website,
           source: `Meta Lead Ad — ${formName}`.slice(0, 80),
-          tags: ["meta-lead", platform.toLowerCase()],
+          tags: ["meta-lead", platform.toLowerCase(), ...consentTags],
         });
         contactId = created.id;
         if (created.email) byEmail.set(created.email.toLowerCase(), created);
@@ -358,6 +369,9 @@ async function doSync(): Promise<SyncResult> {
 }
 
 // ---- Sample data (no Meta connection yet) ------------------------------------
+
+/** Campaigns built in sample mode, so the builder can be tried before Meta is connected. */
+export const sampleDrafts: MetaCampaign[] = [];
 
 function sampleOverview(range: number): MetaOverview {
   let seed = 4242 + range;
@@ -424,6 +438,6 @@ function sampleOverview(range: number): MetaOverview {
       cpl: leads ? totalSpend / leads : null,
     },
     daily,
-    campaigns,
+    campaigns: [...sampleDrafts, ...campaigns],
   };
 }

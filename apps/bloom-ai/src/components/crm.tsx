@@ -31,7 +31,7 @@ export function OwnerSelect({ users, value, onChange, allowAll, style }: { users
   );
 }
 
-export function ConfirmModal({ title, children, confirmLabel = "Delete", onConfirm, onClose }: { title: string; children: ReactNode; confirmLabel?: string; onConfirm: () => Promise<void> | void; onClose: () => void }) {
+export function ConfirmModal({ title, children, confirmLabel = "Delete", onConfirm, onClose, tone = "danger" }: { title: string; children: ReactNode; confirmLabel?: string; onConfirm: () => Promise<void> | void; onClose: () => void; tone?: "danger" | "primary" }) {
   const [busy, setBusy] = useState(false);
   return (
     <Modal
@@ -41,8 +41,8 @@ export function ConfirmModal({ title, children, confirmLabel = "Delete", onConfi
         <>
           <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button
-            className="btn"
-            style={{ background: "var(--bad)", borderColor: "var(--bad)", color: "#fff" }}
+            className={`btn ${tone === "primary" ? "primary" : ""}`}
+            style={tone === "danger" ? { background: "var(--bad)", borderColor: "var(--bad)", color: "#fff" } : undefined}
             disabled={busy}
             onClick={async () => {
               setBusy(true);

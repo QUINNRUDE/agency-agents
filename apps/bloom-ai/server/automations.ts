@@ -151,12 +151,15 @@ export const OPTED_OUT_TAGS = ["opted-out", "dnd", "do-not-contact"];
 const PROSPECT_TAGS = ["prospect", "cold-list"];
 // Any of these, or the contact messaging you first, counts as permission to text.
 const CONSENT_TAGS = ["sms-ok", "sms-consent", "opted-in"];
+// Said "no texts" on a lead form: email is fine, texts are not, unless they text you first.
+const DECLINED_TAGS = ["no-texts"];
 
-/** A cold prospect with no permission to receive automated texts yet. */
+/** A cold prospect, or someone who declined texts, with no permission to receive automated texts. */
 export function noTextConsent(c: Contact): boolean {
   const tags = c.tags.map((t) => t.toLowerCase());
-  if (!tags.some((t) => PROSPECT_TAGS.includes(t))) return false;
-  if (tags.some((t) => CONSENT_TAGS.includes(t))) return false;
+  const declined = tags.some((t) => DECLINED_TAGS.includes(t));
+  if (!declined && !tags.some((t) => PROSPECT_TAGS.includes(t))) return false;
+  if (!declined && tags.some((t) => CONSENT_TAGS.includes(t))) return false;
   return !db.read().watch.lastInbound[c.id]?.["*"];
 }
 const HOUR = 3_600_000;

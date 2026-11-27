@@ -8,6 +8,7 @@ import { ACCENTS, Logo, Swatch, useAccent } from "./components/brand.tsx";
 import { Inbox } from "./pages/Inbox.tsx";
 import { Automations } from "./pages/Automations.tsx";
 import { Ads } from "./pages/Ads.tsx";
+import { NewCampaign } from "./pages/NewCampaign.tsx";
 import { Broadcasts } from "./pages/Broadcasts.tsx";
 import { Overview } from "./pages/Overview.tsx";
 import { Clients } from "./pages/Clients.tsx";
@@ -302,6 +303,7 @@ function Shell() {
             <Route path="/inbox/:contactId" element={<Inbox />} />
             <Route path="/automations" element={<Automations />} />
             <Route path="/ads" element={<Ads />} />
+            <Route path="/ads/new" element={<NewCampaign />} />
             <Route path="/broadcasts" element={<Broadcasts />} />
             <Route path="/prospecting" element={<Prospecting />} />
             <Route path="/calls" element={<Calls />} />

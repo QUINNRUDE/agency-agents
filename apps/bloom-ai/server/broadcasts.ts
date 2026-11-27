@@ -55,7 +55,7 @@ export function exclusion(c: Contact, channel: "SMS" | "Email"): string | null {
   if (c.dnd || tags.some((t) => OPTED_OUT_TAGS.includes(t))) return "Opted out / DND";
   if (channel === "SMS" && !c.phone) return "No phone number";
   if (channel === "Email" && !c.email) return "No email address";
-  if (channel === "SMS" && noTextConsent(c)) return "Cold prospect (no permission to text)";
+  if (channel === "SMS" && noTextConsent(c)) return "No permission to text";
   return null;
 }
 

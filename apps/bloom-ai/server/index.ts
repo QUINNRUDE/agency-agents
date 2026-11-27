@@ -7,7 +7,8 @@ import { authEnabled, authMiddleware, hosted, mountAuthRoutes } from "./auth.ts"
 import { generateMessage, PLAYBOOKS, streamAgent, testClaude } from "./ai.ts";
 import * as engine from "./automations.ts";
 import * as broadcasts from "./broadcasts.ts";
-import { metaOverview, MetaError, syncLeads, testMeta, updateCampaign, listForms, type MetaOverview } from "./meta.ts";
+import { actId, metaOverview, MetaError, syncLeads, testMeta, updateCampaign, listForms, type MetaOverview } from "./meta.ts";
+import { adAssets, createCampaign, CTAS, parseCampaign, searchLocations, writeAdCopy } from "./adBuilder.ts";
 import { getSettings, publicSettings, saveSettings } from "./config.ts";
 import { activeDemo, crm, testGhl } from "./crm/index.ts";
 import { CrmError, SEND_CHANNELS, type Contact, type ContactInput, type Message, type Opportunity, type Pipeline } from "./crm/types.ts";
@@ -18,9 +19,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.set("trust proxy", 1); // behind the hosting platform's HTTPS proxy
 app.disable("x-powered-by");
-app.use(express.json({ limit: "2mb" }));
+// New campaigns carry their ad image, so that one route takes a bigger body, and only after login.
+const BIG_BODY = (req: Request) => req.method === "POST" && req.path === "/api/meta/campaigns";
+const smallJson = express.json({ limit: "2mb" });
+app.use((req, res, next) => (BIG_BODY(req) ? next() : smallJson(req, res, next)));
 mountAuthRoutes(app);
 app.use(authMiddleware);
+app.use("/api/meta/campaigns", express.json({ limit: "15mb" }));
 
 // Any successful change to CRM data asks the automation engine to look for new triggers right away.
 app.use((req, res, next) => {
@@ -988,9 +993,35 @@ async function attribution(ov: MetaOverview) {
 app.get(
   "/api/meta/overview",
   route(async (req) => {
-    const ov = await metaOverview(Number(req.query.range ?? 30));
+    const s = getSettings();
+    const account = String(req.query.account ?? "");
+    // CRM attribution only makes sense for your own ad account, not a client's.
+    const own = !account || !s.metaAdAccountId || actId(account) === actId(s.metaAdAccountId);
+    const ov = await metaOverview(Number(req.query.range ?? 30), account);
     const st = localDb.read();
-    return { ...ov, attribution: await attribution(ov).catch(() => null), sync: st.metaSync, autoSync: getSettings().metaAutoSync === "on", hasPage: Boolean(getSettings().metaPageId) };
+    return { ...ov, own, attribution: own ? await attribution(ov).catch(() => null) : null, sync: st.metaSync, autoSync: s.metaAutoSync === "on", hasPage: Boolean(s.metaPageId) };
+  }),
+);
+
+// ---- Campaign builder ----------------------------------------------------------------
+
+app.get("/api/meta/assets", route(async () => adAssets()));
+app.get("/api/meta/locations", route(async (req) => searchLocations(String(req.query.q ?? ""))));
+app.post(
+  "/api/meta/ad-copy",
+  route(async (req) => {
+    const b = req.body ?? {};
+    const t = (k: string) => String(b[k] ?? "").trim().slice(0, 500);
+    const cta = String(b.cta ?? "");
+    return writeAdCopy({ business: t("business"), offer: t("offer"), audience: t("audience"), place: t("place"), notes: t("notes"), cta: cta in CTAS ? (cta as keyof typeof CTAS) : "GET_QUOTE" });
+  }),
+);
+app.post(
+  "/api/meta/campaigns",
+  route(async (req) => {
+    const parsed = parseCampaign(req.body);
+    if (!parsed.ok) throw new MetaError(parsed.errors.join(" "), 400);
+    return createCampaign(parsed.input);
   }),
 );
 
@@ -1003,7 +1034,7 @@ app.put(
   }),
 );
 
-app.get("/api/meta/forms", route(async () => listForms()));
+app.get("/api/meta/forms", route(async (req) => listForms(String(req.query.page ?? ""))));
 app.get("/api/meta/leads", route(async () => localDb.read().metaLeads.slice(0, 200)));
 
 async function runMetaSync() {

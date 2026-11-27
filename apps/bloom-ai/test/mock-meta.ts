@@ -2,12 +2,14 @@
 import express from "express";
 
 export const metaCalls: { method: string; path: string; params: Record<string, string> }[] = [];
+/** Extra lead-form submissions a test can add to FORM1. */
+export const extraLeads: Record<string, unknown>[] = [];
 const TOKEN = "EAA-test";
 const PAGE_TOKEN = "PAGE-test";
 
 export function startMetaMock(port: number) {
   const app = express();
-  app.use(express.urlencoded({ extended: false }));
+  app.use(express.urlencoded({ extended: false, limit: "20mb" }));
   app.use((req, res, next) => {
     const params = { ...(req.query as Record<string, string>), ...(req.body ?? {}) };
     metaCalls.push({ method: req.method, path: req.path, params });
@@ -20,7 +22,26 @@ export function startMetaMock(port: number) {
   const r = express.Router();
   r.get("/me", (_q, s) => s.json({ id: "u1", name: "Bloom Test User" }));
   r.get("/me/adaccounts", (_q, s) => s.json({ data: [{ id: "act_123", name: "Main Account", currency: "USD", account_status: 1 }] }));
-  r.get("/me/accounts", (_q, s) => s.json({ data: [{ id: "PAGE1", name: "Reyes Roofing Page" }] }));
+  r.get("/me/accounts", (_q, s) => s.json({ data: [{ id: "PAGE1", name: "Reyes Roofing Page", instagram_business_account: { id: "IG1", username: "reyesroofing" } }] }));
+  r.get("/search", (q, s) => {
+    if (q.query.type !== "adgeolocation") return void s.status(400).json({ error: { code: 100, message: "bad search type" } });
+    s.json({
+      data: [
+        { key: "2420379", name: "Austin", type: "city", region: "Texas", country_code: "US", country_name: "United States" },
+        { key: "US:78701", name: "78701", type: "zip", primary_city: "Austin", region: "Texas", country_code: "US", country_name: "United States" },
+        { key: "999", name: "Austin", type: "city", region: "Manitoba", country_code: "CA", country_name: "Canada" },
+      ],
+    });
+  });
+  // Campaign builder
+  r.post("/act_123/adimages", (q, s) => (q.body.bytes ? s.json({ images: { bytes: { hash: "HASH1", url: "https://img.test/1.jpg" } } }) : s.status(400).json({ error: { code: 100, message: "no image" } })));
+  r.post("/PAGE1/leadgen_forms", (_q, s) => s.json({ id: "FORM_NEW" }));
+  r.post("/act_123/campaigns", (_q, s) => s.json({ id: "C1" }));
+  r.post("/act_123/adsets", (q, s) => (String(q.body.name).includes("FAIL") ? s.status(400).json({ error: { code: 100, message: "Invalid parameter: targeting" } }) : s.json({ id: "AS1" })));
+  r.post("/act_123/adcreatives", (_q, s) => s.json({ id: "CR1" }));
+  r.post("/act_123/ads", (_q, s) => s.json({ id: "AD1" }));
+  r.post("/C1", (_q, s) => s.json({ success: true }));
+  r.delete("/C1", (_q, s) => s.json({ success: true }));
   r.get("/act_123", (_q, s) => s.json({ id: "act_123", name: "Main Account", currency: "USD", timezone_name: "America/Chicago" }));
   r.get("/act_123/insights", (q, s) => {
     if (q.query.level === "campaign")
@@ -40,6 +61,7 @@ export function startMetaMock(port: number) {
       data: [
         { id: "L1", created_time: new Date().toISOString(), campaign_name: "Spring Leads", ad_name: "Video A", platform: "ig", field_data: [{ name: "full_name", values: ["Priya Shah"] }, { name: "email", values: ["priya@shahplumbing.com"] }, { name: "phone_number", values: ["+15125550144"] }, { name: "what_service_do_you_need?", values: ["Water heater"] }] },
         { id: "L2", created_time: new Date().toISOString(), campaign_name: "Spring Leads", platform: "fb", field_data: [{ name: "first_name", values: ["Dana"] }, { name: "email", values: ["dana@reyes.com"] }] },
+        ...extraLeads,
       ],
     }),
   );
