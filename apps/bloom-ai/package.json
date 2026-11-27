@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,green \"tsx watch server/index.ts\" \"vite\"",
     "build": "vite build",
-    "start": "NODE_ENV=production tsx server/index.ts",
+    "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "tsx test/ghl.test.ts && tsx test/meta-automations.test.ts"
   },
