@@ -7,10 +7,10 @@ import { authEnabled, authMiddleware, hosted, mountAuthRoutes } from "./auth.ts"
 import { generateMessage, PLAYBOOKS, streamAgent, testClaude } from "./ai.ts";
 import * as engine from "./automations.ts";
 import * as broadcasts from "./broadcasts.ts";
-import { actId, metaOverview, MetaError, syncLeads, testMeta, updateCampaign, listForms, type MetaOverview } from "./meta.ts";
+import { actId, metaOverview, MetaError, sampleDrafts, syncLeads, testMeta, updateCampaign, listForms, type MetaOverview } from "./meta.ts";
 import { adAssets, createCampaign, CTAS, parseCampaign, searchLocations, writeAdCopy } from "./adBuilder.ts";
 import { getSettings, publicSettings, saveSettings } from "./config.ts";
-import { activeDemo, crm, testGhl } from "./crm/index.ts";
+import { activeDemo, crm, demoDataOn, localWorkspace, testGhl } from "./crm/index.ts";
 import { CrmError, SEND_CHANNELS, type Contact, type ContactInput, type Message, type Opportunity, type Pipeline } from "./crm/types.ts";
 import { auditWebsite, scoreProspect, searchBusinesses } from "./prospect.ts";
 import { localDb, uid, type SavedView, type CallLog, type CallOutcome, type Prospect, type SiteAudit } from "./store.ts";
@@ -57,9 +57,9 @@ app.get(
     const s = publicSettings();
     try {
       const info = await crm().info();
-      return { ok: true, crm: info, has: s.has, authEnabled };
+      return { ok: true, crm: info, has: s.has, authEnabled, demoData: demoDataOn() };
     } catch (err) {
-      return { ok: false, crm: { mode: "ghl", accountName: "" }, has: s.has, error: err instanceof Error ? err.message : String(err) };
+      return { ok: false, crm: { mode: "ghl", accountName: "" }, has: s.has, demoData: demoDataOn(), error: err instanceof Error ? err.message : String(err) };
     }
   }),
 );
@@ -117,6 +117,39 @@ app.post(
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
+  }),
+);
+
+// ---- Demo data ----------------------------------------------------------------------
+
+// Removing the sample business clears it from the local workspace, along with calls, prospects,
+// automation history and broadcasts that pointed at sample contacts. Settings, keys, automations
+// and anything that belongs to a connected GoHighLevel account are left alone.
+app.post(
+  "/api/workspace/demo-data",
+  route(async (req) => {
+    const action = String(req.body?.action ?? "");
+    const usingLocal = Boolean(activeDemo());
+    if (action === "remove") {
+      if (!demoDataOn()) return { ok: true, demoData: false };
+      const ids = localWorkspace.contactIds();
+      localDb.update((d) => {
+        d.calls = d.calls.filter((c) => !ids.has(c.contactId));
+        d.prospects = d.prospects.filter((p) => !p.sample && !(p.contactId && ids.has(p.contactId)));
+        d.metaLeads = d.metaLeads.filter((l) => !ids.has(l.contactId));
+      });
+      engine.forgetContacts(ids, usingLocal);
+      broadcasts.forgetContacts(ids);
+      sampleDrafts.length = 0;
+      localWorkspace.startFresh(getSettings().profile.yourName);
+      return { ok: true, demoData: false };
+    }
+    if (action === "load") {
+      localWorkspace.loadSample();
+      if (usingLocal) engine.forgetContacts(new Set(), true);
+      return { ok: true, demoData: true };
+    }
+    throw new CrmError('Use action "remove" or "load".', 400);
   }),
 );
 
@@ -544,7 +577,7 @@ app.get(
       ads: await metaOverview(30)
         .then(async (ov) => {
           const at = await attribution(ov).catch(() => null);
-          return { sample: ov.sample, spend: ov.totals.spend, leads: ov.totals.leads, cpl: ov.totals.cpl, roas: at?.roas ?? null, currency: ov.account.currency, daily: ov.daily.slice(-14).map((d) => d.spend) };
+          return { sample: ov.sample, connected: ov.connected, spend: ov.totals.spend, leads: ov.totals.leads, cpl: ov.totals.cpl, roas: at?.roas ?? null, currency: ov.account.currency, daily: ov.daily.slice(-14).map((d) => d.spend) };
         })
         .catch(() => null),
       tasksOverdue: dueTasks.filter((tk) => new Date(tk.dueDate).getTime() < startToday.getTime()).length,
@@ -890,6 +923,7 @@ async function adsContext(): Promise<string> {
   const at = await attribution(ov).catch(() => null);
   const m = (n: number) => `${ov.account.currency} ${n.toFixed(2)}`;
   const t = ov.totals;
+  if (!ov.sample && !ov.connected) return "NOTE: Meta isn't connected yet, so there is no ad data. Say so, and give general advice on starting lead ads for this business.";
   return `${ov.sample ? "NOTE: this is sample data (Meta not connected yet) — say so and keep advice general.\n\n" : ""}## Meta ad account: ${ov.account.name} — last ${ov.range} days
 - Spend ${m(t.spend)} · Impressions ${t.impressions} · Reach ${t.reach} · Frequency ${t.frequency.toFixed(2)}
 - Clicks ${t.clicks} · CTR ${t.ctr.toFixed(2)}% · CPC ${m(t.cpc)} · CPM ${m(t.cpm)}

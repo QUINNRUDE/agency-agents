@@ -3,6 +3,8 @@
 import dns from "node:dns/promises";
 import net from "node:net";
 import { getSettings } from "./config.ts";
+import { demoDataOn } from "./crm/index.ts";
+import { CrmError } from "./crm/types.ts";
 import { uid, type Prospect, type SiteAudit } from "./store.ts";
 
 const FIELD_MASK = [
@@ -51,7 +53,10 @@ export interface SearchInput {
 export async function searchBusinesses(input: SearchInput): Promise<{ prospects: Prospect[]; sample: boolean }> {
   const key = getSettings().googlePlacesApiKey;
   const search = `${input.niche} in ${input.location}`.trim();
-  if (!key) return { prospects: sampleProspects(input, search), sample: true };
+  if (!key) {
+    if (!demoDataOn()) throw new CrmError("Add your Google Places API key in Settings → Google Places to search real businesses.", 400);
+    return { prospects: sampleProspects(input, search), sample: true };
+  }
 
   const max = Math.min(input.maxResults ?? 40, 60);
   const out: Prospect[] = [];

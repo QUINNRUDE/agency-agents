@@ -111,7 +111,7 @@ export function Inbox() {
     setSending(true);
     try {
       const r = await api.post<{ delivered: boolean }>("/api/messages", { contactId: t.contact.id, channel, body: text.trim(), subject: channel === "Email" ? subject || "Following up" : undefined });
-      toast(r.delivered ? `Sent via ${CHANNEL_NAMES[channel]}` : "Recorded in the demo workspace (not delivered)");
+      toast(r.delivered ? `Sent via ${CHANNEL_NAMES[channel]}` : "Saved here, not sent (GoHighLevel isn't connected)");
       setText("");
       void thread.reload();
       void list.reload();
@@ -223,7 +223,7 @@ export function Inbox() {
                 ) : (t.lastInbound.IG || t.lastInbound.FB) ? (
                   <span className="badge" title="Meta only allows business messages within 24 hours of their last DM">DM window closed</span>
                 ) : null}
-                {status?.crm.mode === "demo" && (
+                {status?.crm.mode === "demo" && status.demoData !== false && (
                   <button className="btn sm" onClick={() => setSim({ ...sim, open: !sim.open })}><FlaskConical /> Simulate incoming</button>
                 )}
                 <Link className="btn sm ghost" to={`/clients/${t.contact.id}`}><UserRound /> Profile</Link>

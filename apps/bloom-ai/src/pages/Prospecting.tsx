@@ -138,7 +138,15 @@ export function Prospecting() {
 
       {!status?.has.places && (
         <Banner tone="info">
-          Without a Google Places key, searches return clearly-labelled sample businesses so you can try the workflow. <Link to="/settings#places">Add a Places API key</Link> to search real businesses with live phone numbers, ratings and websites.
+          {status?.demoData === false ? (
+            <>
+              <Link to="/settings#places">Add a Google Places API key</Link> to search real businesses with live phone numbers, ratings and websites. Until then, you can add clients with Clients → Import.
+            </>
+          ) : (
+            <>
+              Without a Google Places key, searches return clearly-labelled sample businesses so you can try the workflow. <Link to="/settings#places">Add a Places API key</Link> to search real businesses with live phone numbers, ratings and websites.
+            </>
+          )}
         </Banner>
       )}
       {sample && results && <Banner tone="warn">These are sample results, not real businesses.</Banner>}

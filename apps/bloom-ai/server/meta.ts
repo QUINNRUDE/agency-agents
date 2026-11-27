@@ -2,7 +2,7 @@
 // controls, and Lead Ads → CRM sync. Uses the Graph API with a long-lived
 // System User or user access token.
 import { getSettings } from "./config.ts";
-import { crm } from "./crm/index.ts";
+import { crm, demoDataOn } from "./crm/index.ts";
 import type { Contact } from "./crm/types.ts";
 import { localDb, type MetaLead } from "./store.ts";
 
@@ -103,6 +103,8 @@ export interface MetaCampaign {
 
 export interface MetaOverview {
   sample: boolean;
+  /** False when no ad account is connected (sample or empty data). */
+  connected: boolean;
   account: { id: string; name: string; currency: string; timezone: string };
   range: number;
   totals: { spend: number; impressions: number; clicks: number; reach: number; ctr: number; cpc: number; cpm: number; frequency: number; leads: number; cpl: number | null };
@@ -127,7 +129,7 @@ export async function metaOverview(rangeDays: number, accountId = ""): Promise<M
   const s = getSettings();
   const range = PRESET[rangeDays] ? rangeDays : 30;
   const account = accountId || s.metaAdAccountId;
-  if (!s.metaAccessToken || !account) return sampleOverview(range);
+  if (!s.metaAccessToken || !account) return demoDataOn() ? sampleOverview(range) : emptyOverview(range);
   const act = actId(account);
   const preset = PRESET[range];
   const [acct, totalsRes, dailyRows, campaignRows, campaignMeta] = await Promise.all([
@@ -166,6 +168,7 @@ export async function metaOverview(rangeDays: number, accountId = ""): Promise<M
   });
   return {
     sample: false,
+    connected: true,
     account: { id: act, name: str(acct.name), currency, timezone: str(acct.timezone_name) },
     range,
     totals: {
@@ -373,6 +376,19 @@ async function doSync(): Promise<SyncResult> {
 /** Campaigns built in sample mode, so the builder can be tried before Meta is connected. */
 export const sampleDrafts: MetaCampaign[] = [];
 
+/** No ad account connected and no sample data: zeros, so nothing on screen is made up. */
+function emptyOverview(range: number): MetaOverview {
+  return {
+    sample: false,
+    connected: false,
+    account: { id: "", name: "Not connected", currency: "USD", timezone: "" },
+    range,
+    totals: { spend: 0, impressions: 0, clicks: 0, reach: 0, ctr: 0, cpc: 0, cpm: 0, frequency: 0, leads: 0, cpl: null },
+    daily: [],
+    campaigns: [],
+  };
+}
+
 function sampleOverview(range: number): MetaOverview {
   let seed = 4242 + range;
   const r = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296);
@@ -423,6 +439,7 @@ function sampleOverview(range: number): MetaOverview {
   const leads = daily.reduce((s, d) => s + d.leads, 0);
   return {
     sample: true,
+    connected: false,
     account: { id: "act_sample", name: "Sample ad account", currency: "USD", timezone: "America/Chicago" },
     range,
     totals: {

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { CheckCircle2, Lock, XCircle } from "lucide-react";
+import { CheckCircle2, Lock, RotateCcw, Trash2, XCircle } from "lucide-react";
 import { api, type Pipeline } from "../lib/api.ts";
 import { useApp } from "../App.tsx";
 import { Card, Field, LoadingRows, useAsync, useToast } from "../components/ui.tsx";
+import { ConfirmModal } from "../components/crm.tsx";
 import { ACCENTS, Swatch, useAccent } from "../components/brand.tsx";
 
 interface SettingsData {
@@ -61,8 +62,58 @@ function Lockable({ locked, children }: { locked: boolean; children: React.React
   );
 }
 
+/** Remove the sample business (or bring it back) so the workspace only holds real data. */
+function DemoDataCard({ on, ghl }: { on: boolean; ghl: boolean }) {
+  const toast = useToast();
+  const [confirm, setConfirm] = useState<"remove" | "load" | null>(null);
+  const run = async (action: "remove" | "load") => {
+    try {
+      await api.post("/api/workspace/demo-data", { action });
+      toast(action === "remove" ? "Demo data removed. Your workspace is clean." : "Demo data loaded.");
+      setTimeout(() => window.location.reload(), 700);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "That didn't work", "bad");
+    }
+  };
+  return (
+    <Card title="Demo data" right={<span className={`badge ${on ? "warn" : "good"}`}>{on ? "Showing sample data" : "Removed"}</span>}>
+      <div className="stack">
+        {on ? (
+          <>
+            <p className="small" style={{ margin: 0 }}>
+              Bloom AI comes with a sample business so you can try every screen: 50 sample clients with deals, tasks, notes and messages, plus sample ad numbers and sample Find clients results. Remove it to start with a clean workspace.
+            </p>
+            <p className="faint small" style={{ margin: 0 }}>Your settings, keys, business profile and automations stay.{ghl ? " Your GoHighLevel contacts aren't touched." : ""}</p>
+            <div>
+              <button className="btn" style={{ background: "var(--bad)", borderColor: "var(--bad)", color: "#fff" }} onClick={() => setConfirm("remove")}><Trash2 /> Remove demo data</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="small" style={{ margin: 0 }}>The sample business is gone. Everything you see is your own data.</p>
+            <div>
+              <button className="btn sm ghost" onClick={() => setConfirm("load")}><RotateCcw /> Load demo data again</button>
+            </div>
+          </>
+        )}
+      </div>
+      {confirm === "remove" && (
+        <ConfirmModal title="Remove all demo data?" confirmLabel="Remove demo data" onClose={() => setConfirm(null)} onConfirm={() => run("remove")}>
+          This deletes the 50 sample clients and their deals, tasks, notes, messages and call history, plus the sample ad numbers and sample prospects. Your settings, keys, business profile and automations stay. You can load the demo again later.
+        </ConfirmModal>
+      )}
+      {confirm === "load" && (
+        <ConfirmModal title="Load the demo data again?" confirmLabel="Load demo data" onClose={() => setConfirm(null)} onConfirm={() => run("load")}>
+          This replaces everything in Bloom AI's own workspace (clients, deals, tasks and messages you added there) with the sample business.{ghl ? " Your GoHighLevel data isn't affected." : ""}
+        </ConfirmModal>
+      )}
+    </Card>
+  );
+}
+
 export function Settings() {
-  const { refreshStatus } = useApp();
+  const { refreshStatus, status } = useApp();
+  const demoOn = status?.demoData !== false;
   const toast = useToast();
   const loc = useLocation();
   const s = useAsync(() => api.get<SettingsData>("/api/settings"));
@@ -138,7 +189,7 @@ export function Settings() {
       <div className="page-head">
         <div>
           <h2>Settings</h2>
-          <p>Keys are stored on this machine in <code>apps/bloom-ai/data/settings.json</code> and only sent to the service they belong to.</p>
+          <p>Keys are stored on your Bloom AI server and only sent to the service they belong to.</p>
         </div>
         <div className="actions">
           <button className="btn primary" onClick={() => save()} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
@@ -147,16 +198,24 @@ export function Settings() {
 
       <div className="split" style={{ gridTemplateColumns: "180px minmax(0, 1fr)" }}>
         <nav className="settings-nav">
+          {demoOn && <a href="#demo">Demo data</a>}
           <a href="#ghl">GoHighLevel</a>
           <a href="#claude">Claude</a>
           <a href="#meta">Meta Ads</a>
           <a href="#places">Google Places</a>
           <a href="#appearance">Appearance</a>
           <a href="#profile">Business profile</a>
+          {!demoOn && <a href="#demo">Demo data</a>}
         </nav>
         <div className="stack" style={{ gap: 16 }}>
+          {demoOn && (
+            <>
+              <div id="demo" />
+              <DemoDataCard on ghl={form.has.ghl} />
+            </>
+          )}
           <div id="ghl" />
-          <Card title="GoHighLevel" right={<span className={`badge ${form.has.ghl ? "good" : "warn"}`}>{form.has.ghl ? "Connected" : "Using demo data"}</span>}>
+          <Card title="GoHighLevel" right={<span className={`badge ${form.has.ghl ? "good" : "warn"}`}>{form.has.ghl ? "Connected" : demoOn ? "Using demo data" : "Not connected"}</span>}>
             <div className="stack">
               <ol className="steps">
                 <li>In GoHighLevel, open the sub-account → <b>Settings → Private Integrations</b> → <b>Create new integration</b>.</li>
@@ -186,11 +245,11 @@ export function Settings() {
           </Card>
 
           <div id="meta" />
-          <Card title="Meta Ads (Facebook & Instagram)" right={<span className={`badge ${form.has.meta ? "good" : ""}`}>{form.has.meta ? "Connected" : "Sample data"}</span>}>
+          <Card title="Meta Ads (Facebook & Instagram)" right={<span className={`badge ${form.has.meta ? "good" : ""}`}>{form.has.meta ? "Connected" : demoOn ? "Sample data" : "Not connected"}</span>}>
             <div className="stack">
               <ol className="steps">
                 <li>In <b>Meta Business Settings → Users → System users</b>, add a system user (Admin) and assign it your ad account and Facebook Page.</li>
-                <li>Click <b>Generate new token</b> with permissions: <code>ads_read</code>, <code>ads_management</code> (to pause campaigns / change budgets), <code>leads_retrieval</code>, <code>pages_show_list</code>, <code>pages_read_engagement</code>, <code>pages_manage_metadata</code>, <code>business_management</code>.</li>
+                <li>Click <b>Generate new token</b> with permissions: <code>ads_read</code>, <code>ads_management</code> (to create campaigns, pause them and change budgets), <code>leads_retrieval</code>, <code>pages_show_list</code>, <code>pages_read_engagement</code>, <code>pages_manage_ads</code> (to create lead forms), <code>pages_manage_metadata</code>, <code>business_management</code>.</li>
                 <li>Paste the token, click <b>Test</b>, then pick the ad account and the Page that owns your lead forms.</li>
               </ol>
               <Field label="Access token" hint="A System User token doesn't expire. A personal token from Graph API Explorer works for testing but expires within hours or 60 days.">
@@ -255,7 +314,7 @@ export function Settings() {
           </Card>
 
           <div id="places" />
-          <Card title="Google Places" right={<span className={`badge ${form.has.places ? "good" : ""}`}>{form.has.places ? "Connected" : "Sample mode"}</span>}>
+          <Card title="Google Places" right={<span className={`badge ${form.has.places ? "good" : ""}`}>{form.has.places ? "Connected" : demoOn ? "Sample mode" : "Not connected"}</span>}>
             <div className="stack">
               <div className="small muted">Powers <b>Find clients</b>: real local businesses with phone, website, rating and review count. In Google Cloud, enable <b>Places API (New)</b> and create an API key (restrict it to that API).</div>
               <Field label="API key">
@@ -299,6 +358,12 @@ export function Settings() {
               <div className="row"><span className="spacer" /><button className="btn primary" onClick={() => save()} disabled={saving}>Save profile</button></div>
             </div>
           </Card>
+          {!demoOn && (
+            <>
+              <div id="demo" />
+              <DemoDataCard on={false} ghl={form.has.ghl} />
+            </>
+          )}
         </div>
       </div>
     </div>

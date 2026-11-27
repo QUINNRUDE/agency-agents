@@ -23,3 +23,11 @@ export function testGhl(token: string, locationId: string) {
 export function activeDemo(): DemoCrm | null {
   return crm() === demo ? demo : null;
 }
+
+/** Sample data (the demo business, sample ad numbers, sample prospects) is shown until the user removes it. */
+export function demoDataOn(): boolean {
+  return demo.isSample();
+}
+
+/** The local workspace, for starting fresh or loading the sample business again. */
+export const localWorkspace = demo;

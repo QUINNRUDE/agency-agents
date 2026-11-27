@@ -288,3 +288,11 @@ export async function sendTest(input: { channel: "SMS" | "Email"; message: strin
 }
 
 setInterval(() => void tickBroadcasts(), 5_000).unref();
+
+/** Removes recipients that were sample contacts, and broadcasts that only went to them. */
+export function forgetContacts(ids: Set<string>): void {
+  file.update((d) => {
+    for (const b of d.broadcasts) b.recipients = b.recipients.filter((r) => !ids.has(r.contactId));
+    d.broadcasts = d.broadcasts.filter((b) => b.recipients.length > 0);
+  });
+}

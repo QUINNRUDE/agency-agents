@@ -29,7 +29,7 @@ export function ComposeModal({
     setBusy(true);
     try {
       const r = await api.post<{ delivered: boolean }>("/api/messages", { contactId: contact.id, channel, body, subject });
-      toast(r.delivered ? `${CHANNEL_NAMES[channel]} message sent via GoHighLevel` : "Saved to the demo conversation (nothing was sent)");
+      toast(r.delivered ? `${CHANNEL_NAMES[channel]} message sent via GoHighLevel` : "Saved here, not sent (GoHighLevel isn't connected)");
       onSent?.();
       onClose();
     } catch (e) {
@@ -66,7 +66,7 @@ export function ComposeModal({
         To: {channel === "SMS" || channel === "WhatsApp" ? contact.phone || "no phone on file" : channel === "Email" ? contact.email || "no email on file" : `${contact.name} on ${CHANNEL_NAMES[channel]}`}
       </div>
       {(channel === "IG" || channel === "FB") && <div className="faint small">Meta only allows business messages within 24 hours of the person's last DM to you. Your Instagram / Facebook Page must be connected in GoHighLevel.</div>}
-      {status?.crm.mode === "demo" && <Banner tone="warn">Demo workspace — the message is recorded locally, not sent. Connect GoHighLevel to send for real.</Banner>}
+      {status?.crm.mode === "demo" && <Banner tone="warn">GoHighLevel isn't connected, so the message is saved here, not sent. Connect GoHighLevel to send for real.</Banner>}
       {channel === "Email" && (
         <Field label="Subject">
           <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />

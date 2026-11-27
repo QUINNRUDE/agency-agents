@@ -181,6 +181,8 @@ export interface ContactQuery {
 export interface CrmInfo {
   mode: "ghl" | "demo";
   accountName: string;
+  /** Local workspace only: true while it holds the sample business, false once the user starts fresh. */
+  sample?: boolean;
 }
 
 export interface Crm {

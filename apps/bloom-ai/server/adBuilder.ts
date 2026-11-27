@@ -6,6 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { claudeClient } from "./ai.ts";
 import { getAgent } from "./agents.ts";
 import { getSettings } from "./config.ts";
+import { demoDataOn } from "./crm/index.ts";
 import { actId, arr, graph, minorFactor, MetaError, num, obj, pageToken, sampleDrafts, str, TEXT_CONSENT_KEY, type Json } from "./meta.ts";
 import { CTAS, SAMPLE_PLACES, templateCopy, type AdLocation, type CopyInput, type CopyVariant, type Cta } from "./adTemplates.ts";
 
@@ -132,6 +133,7 @@ export interface AdAssets {
 
 export async function adAssets(): Promise<AdAssets> {
   const s = getSettings();
+  if (!s.metaAccessToken && !demoDataOn()) return { connected: false, adAccounts: [], pages: [], defaults: { adAccountId: "", pageId: "" } };
   if (!s.metaAccessToken) {
     return {
       connected: false,
@@ -164,6 +166,7 @@ export async function searchLocations(q: string): Promise<AdLocation[]> {
   const term = q.trim();
   if (term.length < 2) return [];
   if (!getSettings().metaAccessToken) {
+    if (!demoDataOn()) throw new MetaError("Connect Meta in Settings → Meta Ads to search locations.", 400);
     const t = term.toLowerCase();
     return SAMPLE_PLACES.filter((p) => p.name.toLowerCase().startsWith(t) || p.detail.toLowerCase().includes(t)).slice(0, 8);
   }
@@ -249,6 +252,7 @@ export interface CreateResult {
 
 export async function createCampaign(input: NewCampaign): Promise<CreateResult> {
   const s = getSettings();
+  if (!s.metaAccessToken && !demoDataOn()) throw new MetaError("Connect Meta in Settings → Meta Ads before creating a campaign.", 400);
   if (!s.metaAccessToken) {
     // Sample mode: show the campaign in the list so the flow can be tried end to end.
     const id = `sample_new_${sampleDrafts.length + 1}`;

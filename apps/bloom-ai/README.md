@@ -96,6 +96,8 @@ For development: `npm run dev` (UI on :5173, API on :4400).
 
 It starts in a **demo workspace** with a realistic seeded book of business. Automations really run in the demo, but messages are recorded instead of delivered. Use **Inbox → Simulate incoming** to watch the DM and text responders reply.
 
+When you're ready for real data, go to **Settings → Demo data → Remove demo data**. That deletes the sample clients, deals, tasks, messages and call history, and stops showing sample ad numbers and sample Find clients results. Your settings, keys, business profile and automations stay. Without GoHighLevel, Bloom AI then works as your own CRM (texts and emails are saved but not sent until GoHighLevel is connected). You can load the demo again from the same card.
+
 ## Put it online (Render)
 
 Hosting gives Bloom AI its own web address that works on any device, and keeps automations running 24/7. The repository includes a `render.yaml` blueprint, so setup is mostly clicking:
@@ -129,7 +131,7 @@ API keys, call logs, prospects, synced Meta leads and automation history are sto
 ## Tests
 
 ```bash
-npm test            # GoHighLevel CRM (24 checks) + Meta Ads, campaign builder, automations & broadcasts (27 checks) against mock APIs
+npm test            # GoHighLevel CRM (24) + Meta Ads, campaign builder, automations & broadcasts (27) + demo-data removal (4), against mock APIs
 npm run typecheck
 ```
 

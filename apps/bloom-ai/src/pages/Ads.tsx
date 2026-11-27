@@ -29,6 +29,7 @@ interface Campaign {
 
 interface Overview {
   sample: boolean;
+  connected?: boolean;
   account: { id: string; name: string; currency: string; timezone: string };
   range: number;
   totals: { spend: number; impressions: number; clicks: number; reach: number; ctr: number; cpc: number; cpm: number; frequency: number; leads: number; cpl: number | null };
@@ -167,6 +168,11 @@ export function Ads() {
           Sample ad data. <Link to="/settings#meta">Connect your Meta ad account</Link> to see your real spend, pause campaigns, change budgets and pull lead-form leads into the CRM automatically.
         </Banner>
       )}
+      {d && !d.sample && d.connected === false && (
+        <Banner tone="info">
+          Meta isn't connected yet. <Link to="/settings#meta">Connect your ad account</Link> to see spend, leads and return on ad spend here, and to launch campaigns.
+        </Banner>
+      )}
       {d?.sync.lastError && <Banner tone="bad">Last lead sync failed: {d.sync.lastError}</Banner>}
       {ov.error && <ErrorState error={ov.error} onRetry={ov.reload} />}
 
@@ -285,7 +291,7 @@ export function Ads() {
             </table>
           </div>
         ) : (
-          <Empty title="No campaigns in this ad account">
+          <Empty title={d.connected === false && !d.sample ? "No ad account connected yet" : "No campaigns in this ad account"}>
             <Link className="btn primary" to="/ads/new" style={{ marginTop: 8 }}><Plus /> Create your first campaign</Link>
           </Empty>
         )}

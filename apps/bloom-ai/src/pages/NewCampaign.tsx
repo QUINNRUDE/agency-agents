@@ -252,9 +252,14 @@ export function NewCampaign() {
         </div>
       </div>
 
-      {a && !a.connected && (
+      {a && !a.connected && a.adAccounts.length > 0 && (
         <Banner tone="warn">
           Sample mode. <Link to="/settings#meta">Connect Meta</Link> to create real campaigns. You can still build one here to see how it works.
+        </Banner>
+      )}
+      {a && !a.connected && a.adAccounts.length === 0 && (
+        <Banner tone="info">
+          <Link to="/settings#meta">Connect Meta in Settings</Link> to build campaigns. The builder needs your ad account and Facebook Page. You can still plan your ad here.
         </Banner>
       )}
       {assets.error && <Banner tone="bad">{assets.error}</Banner>}

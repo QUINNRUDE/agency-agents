@@ -238,7 +238,7 @@ function Shell() {
           <Link to="/settings#ghl" className="conn" style={{ textDecoration: "none" }}>
             <span className={`dot ${connected ? "on" : status && !status.ok ? "off" : "demo"}`} />
             <span>
-              {connected ? "GoHighLevel connected" : status && !status.ok ? "GoHighLevel error" : "Demo workspace"}
+              {connected ? "GoHighLevel connected" : status && !status.ok ? "GoHighLevel error" : status?.demoData === false ? "Your workspace" : "Demo workspace"}
               <small>{connected ? status?.crm.accountName : status && !status.ok ? "Check Settings" : "Connect GoHighLevel →"}</small>
             </span>
           </Link>
@@ -275,7 +275,7 @@ function Shell() {
         )}
         <header className="topbar">
           <h1>{title}</h1>
-          {mode === "demo" && <span className="badge warn">Demo data</span>}
+          {mode === "demo" && status?.demoData !== false && <span className="badge warn">Demo data</span>}
           <button className="search-trigger" onClick={() => setPalette(true)} aria-label="Search">
             <Search size={15} />
             <span>Search clients or jump to…</span>

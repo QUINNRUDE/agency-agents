@@ -50,9 +50,11 @@ export const api = {
 
 export interface Status {
   ok: boolean;
-  crm: { mode: "ghl" | "demo"; accountName: string };
+  crm: { mode: "ghl" | "demo"; accountName: string; sample?: boolean };
   has: { ghl: boolean; claude: boolean; places: boolean; meta: boolean };
   authEnabled?: boolean;
+  /** Sample business, sample ad numbers and sample prospects are shown until the user removes them. */
+  demoData?: boolean;
   error?: string;
 }
 
@@ -119,7 +121,7 @@ export interface Dashboard {
   tasksToday: number;
   spark: { leads: number[]; calls: number[]; won: number[] };
   today: { calls: number; callGoal: number; newLeads: number; automated: number };
-  ads: { sample: boolean; spend: number; leads: number; cpl: number | null; roas: number | null; currency: string; daily: number[] } | null;
+  ads: { sample: boolean; connected?: boolean; spend: number; leads: number; cpl: number | null; roas: number | null; currency: string; daily: number[] } | null;
   recentCalls: CallLog[];
   newestContacts: Contact[];
 }

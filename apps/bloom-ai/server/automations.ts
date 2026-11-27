@@ -154,6 +154,18 @@ const CONSENT_TAGS = ["sms-ok", "sms-consent", "opted-in"];
 // Said "no texts" on a lead form: email is fine, texts are not, unless they text you first.
 const DECLINED_TAGS = ["no-texts"];
 
+/**
+ * Drops runs and log entries for contacts that no longer exist (the sample business), and
+ * optionally forgets what the engine has seen so it takes a fresh first look at the CRM.
+ */
+export function forgetContacts(ids: Set<string>, resetWatch: boolean): void {
+  db.update((d) => {
+    d.runs = d.runs.filter((r) => !ids.has(r.contactId));
+    d.log = d.log.filter((l) => !ids.has(l.contactId));
+    if (resetWatch) d.watch = freshWatch();
+  });
+}
+
 /** A cold prospect, or someone who declined texts, with no permission to receive automated texts. */
 export function noTextConsent(c: Contact): boolean {
   const tags = c.tags.map((t) => t.toLowerCase());

@@ -33,6 +33,8 @@ interface DemoDb {
   tasks: Task[];
   appointments: Appointment[];
   messages: Message[];
+  /** False once the user removed the sample business. Missing = the sample (older files). */
+  sample?: boolean;
 }
 
 // Deterministic PRNG so the seed is identical on every machine.
@@ -93,6 +95,49 @@ const NOTE_LINES = [
   "Budget confirmed around $3k/mo all-in. Wants reporting they can read in 2 minutes.",
 ];
 
+function defaultPipelines(): Pipeline[] {
+  return [
+    {
+      id: "pl_acq",
+      name: "Client Acquisition",
+      stages: [
+        { id: "st_new", name: "New Lead", position: 0 },
+        { id: "st_contacted", name: "Contacted", position: 1 },
+        { id: "st_discovery", name: "Discovery Booked", position: 2 },
+        { id: "st_proposal", name: "Proposal Sent", position: 3 },
+        { id: "st_negotiation", name: "Negotiation", position: 4 },
+        { id: "st_won", name: "Closed Won", position: 5 },
+      ],
+    },
+    {
+      id: "pl_acct",
+      name: "Account Management",
+      stages: [
+        { id: "st_onboard", name: "Onboarding", position: 0 },
+        { id: "st_active", name: "Active", position: 1 },
+        { id: "st_risk", name: "At Risk", position: 2 },
+        { id: "st_renewal", name: "Renewal Due", position: 3 },
+      ],
+    },
+  ];
+}
+
+/** A clean local workspace: the same pipelines and fields, and no sample clients. */
+function emptyWorkspace(ownerName: string): DemoDb {
+  return {
+    users: [{ id: "us_me", name: ownerName || "Me", email: "" }],
+    customFields: CUSTOM_FIELDS,
+    contacts: [],
+    pipelines: defaultPipelines(),
+    opportunities: [],
+    notes: [],
+    tasks: [],
+    appointments: [],
+    messages: [],
+    sample: false,
+  };
+}
+
 function seed(): DemoDb {
   const r = rng(20261127);
   const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
@@ -100,28 +145,7 @@ function seed(): DemoDb {
   const day = 86_400_000;
   const ago = (d: number) => new Date(now - d * day).toISOString();
 
-  const acquisition: Pipeline = {
-    id: "pl_acq",
-    name: "Client Acquisition",
-    stages: [
-      { id: "st_new", name: "New Lead", position: 0 },
-      { id: "st_contacted", name: "Contacted", position: 1 },
-      { id: "st_discovery", name: "Discovery Booked", position: 2 },
-      { id: "st_proposal", name: "Proposal Sent", position: 3 },
-      { id: "st_negotiation", name: "Negotiation", position: 4 },
-      { id: "st_won", name: "Closed Won", position: 5 },
-    ],
-  };
-  const accounts: Pipeline = {
-    id: "pl_acct",
-    name: "Account Management",
-    stages: [
-      { id: "st_onboard", name: "Onboarding", position: 0 },
-      { id: "st_active", name: "Active", position: 1 },
-      { id: "st_risk", name: "At Risk", position: 2 },
-      { id: "st_renewal", name: "Renewal Due", position: 3 },
-    ],
-  };
+  const [acquisition, accounts] = defaultPipelines();
 
   const contacts: Contact[] = BUSINESSES.map(([company, niche], i) => {
     const firstName = FIRST[i % FIRST.length];
@@ -278,7 +302,27 @@ export class DemoCrm implements Crm {
   };
 
   async info(): Promise<CrmInfo> {
-    return { mode: "demo", accountName: "Demo workspace" };
+    const sample = this.isSample();
+    return { mode: "demo", accountName: sample ? "Demo workspace" : "Your workspace", sample };
+  }
+
+  isSample(): boolean {
+    return this.db.read().sample !== false;
+  }
+
+  /** Ids of every contact in the local workspace (to tidy up records that point at them). */
+  contactIds(): Set<string> {
+    return new Set(this.db.read().contacts.map((c) => c.id));
+  }
+
+  /** Replaces the local workspace with an empty one. */
+  startFresh(ownerName: string): void {
+    this.file.write(emptyWorkspace(ownerName));
+  }
+
+  /** Replaces the local workspace with the sample business again. */
+  loadSample(): void {
+    this.file.write(seed());
   }
 
   async listContacts(q: ContactQuery): Promise<Contact[]> {

@@ -56,7 +56,7 @@ export function Overview() {
             <div className="glass"><b>{data?.today.newLeads ?? "–"}</b><span>new leads today</span></div>
             <div className="glass"><b>{data?.today.automated ?? "–"}</b><span>auto-messages, 24h</span></div>
             <div className="glass"><b>{k ? moneyShort(k.openValue) : "–"}</b><span>open pipeline</span></div>
-            {data?.ads && <div className="glass"><b>{data.ads.roas === null ? moneyShort(data.ads.spend) : `${data.ads.roas.toFixed(1)}x`}</b><span>{data.ads.roas === null ? "ad spend, 30d" : "ad ROAS, 30d"}{data.ads.sample ? " (sample)" : ""}</span></div>}
+            {data?.ads && (data.ads.sample || data.ads.connected) && <div className="glass"><b>{data.ads.roas === null ? moneyShort(data.ads.spend) : `${data.ads.roas.toFixed(1)}x`}</b><span>{data.ads.roas === null ? "ad spend, 30d" : "ad ROAS, 30d"}{data.ads.sample ? " (sample)" : ""}</span></div>}
           </div>
           <div className="row wrap" style={{ marginTop: 16 }}>
             <Link className="btn" to="/calls"><PhoneCall /> Start calling</Link>
@@ -71,9 +71,14 @@ export function Overview() {
         </div>
       </section>
 
-      {status?.crm.mode === "demo" && (
+      {status?.crm.mode === "demo" && status.demoData !== false && (
         <Banner tone="warn">
-          You're looking at a demo workspace. <Link to="/settings#ghl">Connect GoHighLevel</Link> to work with your real contacts, pipeline and calendar — everything here switches over automatically.
+          You're looking at a demo workspace. <Link to="/settings#ghl">Connect GoHighLevel</Link> to work with your real contacts, pipeline and calendar, or <Link to="/settings#demo">remove the demo data</Link> to start with a clean workspace.
+        </Banner>
+      )}
+      {status?.crm.mode === "demo" && status.demoData === false && (
+        <Banner tone="info">
+          Your workspace is ready. Add clients with <Link to="/prospecting">Find clients</Link> or <Link to="/clients">Clients → Import</Link>, or <Link to="/settings#ghl">connect GoHighLevel</Link> to bring in your contacts. Texts and emails are only sent once GoHighLevel is connected.
         </Banner>
       )}
       {status && !status.ok && <Banner tone="bad">GoHighLevel connection failed: {status.error}</Banner>}
@@ -115,7 +120,7 @@ export function Overview() {
             )}
       </div>
 
-      {data?.ads && (
+      {data?.ads && (data.ads.sample || data.ads.connected) && (
         <Link to="/ads" className="card lift" style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto", gap: 16, alignItems: "center", textDecoration: "none", color: "inherit" }}>
           <span className="ichip grad"><Megaphone /></span>
           <div className="row wrap" style={{ gap: 22 }}>

@@ -265,7 +265,7 @@ export function Automations() {
       )}
       {appStatus?.crm.mode === "demo" && (
         <Banner tone="info">
-          Demo workspace: automations really run, but messages are recorded here instead of being delivered. Use <b>Inbox → Simulate incoming</b> to test the DM and text responders. <Link to="/settings#ghl">Connect GoHighLevel</Link> to go live.
+          GoHighLevel isn't connected, so automations run but messages are saved here instead of being sent.{appStatus.demoData !== false && <> Use <b>Inbox → Simulate incoming</b> to test the DM and text responders.</>} <Link to="/settings#ghl">Connect GoHighLevel</Link> to go live.
         </Banner>
       )}
       {s?.status.lastError && <Banner tone="bad">The automation engine couldn't read the CRM: {s.status.lastError}</Banner>}

@@ -247,7 +247,7 @@ function Composer({ initialAudience, onClose, onCreated }: { initialAudience: Au
     if (!testTo) return;
     try {
       const r = await api.post<{ delivered: boolean }>("/api/broadcasts/test", { channel, message, subject, optOutLine: optOut, contactId: testTo.id });
-      toast(r.delivered ? `Test sent to ${testTo.name}` : "Test recorded in the demo workspace (not delivered)");
+      toast(r.delivered ? `Test sent to ${testTo.name}` : "Test saved here, not sent (GoHighLevel isn't connected)");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Test failed", "bad");
     }
@@ -286,7 +286,7 @@ function Composer({ initialAudience, onClose, onCreated }: { initialAudience: Au
       onClose={onClose}
       footer={
         <>
-          <span className="faint small" style={{ marginRight: "auto" }}>{status?.crm.mode === "demo" ? "Demo workspace: messages are recorded, not delivered." : ""}</span>
+          <span className="faint small" style={{ marginRight: "auto" }}>{status?.crm.mode === "demo" ? "GoHighLevel isn't connected: messages are saved here, not sent." : ""}</span>
           <button className="btn" onClick={onClose}>Cancel</button>
           <button className="btn primary" disabled={!preview?.eligible || !message.trim() || (channel === "Email" && !subject.trim())} onClick={() => setConfirming(true)}>
             <Send /> Review & {when === "later" ? "schedule" : "send"}
