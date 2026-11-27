@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { BrowserRouter, Link, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Link, MemoryRouter, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { PREVIEW } from "./preview/shim.ts";
 import { Bot, Building2, CheckSquare, Columns3, Inbox as InboxIcon, LayoutDashboard, Megaphone, Moon, Phone, Search, Settings as SettingsIcon, Sun, Telescope, Users, Workflow } from "lucide-react";
 import { api, TASKS_CHANGED, type Contact, type Playbook, type Status } from "./lib/api.ts";
 import { ToastProvider } from "./components/ui.tsx";
@@ -263,6 +264,11 @@ function Shell() {
         </div>
       </aside>
       <div className="main">
+        {PREVIEW && (
+          <div className="preview-ribbon" role="note">
+            <b>Preview</b> Demo data only: saving, sending and connections are switched off.
+          </div>
+        )}
         <header className="topbar">
           <h1>{title}</h1>
           {mode === "demo" && <span className="badge warn">Demo data</span>}
@@ -334,9 +340,15 @@ export function App() {
   return (
     <Ctx.Provider value={value}>
       <ToastProvider>
-        <BrowserRouter>
-          <Shell />
-        </BrowserRouter>
+        {PREVIEW ? (
+          <MemoryRouter>
+            <Shell />
+          </MemoryRouter>
+        ) : (
+          <BrowserRouter>
+            <Shell />
+          </BrowserRouter>
+        )}
       </ToastProvider>
     </Ctx.Provider>
   );

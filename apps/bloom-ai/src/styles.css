@@ -1,11 +1,11 @@
-@import "@fontsource/instrument-sans/400.css";
-@import "@fontsource/instrument-sans/500.css";
-@import "@fontsource/instrument-sans/600.css";
-@import "@fontsource/instrument-sans/700.css";
-@import "@fontsource/ibm-plex-mono/400.css";
-@import "@fontsource/ibm-plex-mono/500.css";
-@import "@fontsource/fraunces/600.css";
-@import "@fontsource/fraunces/600-italic.css";
+@import "@fontsource/instrument-sans/latin-400.css";
+@import "@fontsource/instrument-sans/latin-500.css";
+@import "@fontsource/instrument-sans/latin-600.css";
+@import "@fontsource/instrument-sans/latin-700.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/fraunces/latin-600.css";
+@import "@fontsource/fraunces/latin-600-italic.css";
 
 /* ---------- Accent themes (switchable in Settings / sidebar) ---------- */
 :root,
@@ -697,3 +697,6 @@ ol.steps { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 13px;
   .hero h2 { font-size: 24px; }
   .bubble { max-width: 88%; }
 }
+
+.preview-ribbon { flex: none; display: flex; gap: 8px; align-items: center; justify-content: center; padding: 6px 16px; font-size: 12.5px; color: #fff; background: var(--grad); text-align: center; }
+.preview-ribbon b { font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; font-size: 11px; background: rgba(255, 255, 255, 0.22); padding: 1px 7px; border-radius: 999px; }
