@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentMeta, allAgents, getAgent } from "./agents.ts";
+import { authEnabled, authMiddleware, hosted, mountAuthRoutes } from "./auth.ts";
 import { generateMessage, PLAYBOOKS, streamAgent, testClaude } from "./ai.ts";
 import * as engine from "./automations.ts";
 import { metaOverview, MetaError, syncLeads, testMeta, updateCampaign, listForms, type MetaOverview } from "./meta.ts";
@@ -14,7 +15,11 @@ import { localDb, uid, type SavedView, type CallLog, type CallOutcome, type Pros
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+app.set("trust proxy", 1); // behind the hosting platform's HTTPS proxy
+app.disable("x-powered-by");
 app.use(express.json({ limit: "2mb" }));
+mountAuthRoutes(app);
+app.use(authMiddleware);
 
 // Any successful change to CRM data asks the automation engine to look for new triggers right away.
 app.use((req, res, next) => {
@@ -46,7 +51,7 @@ app.get(
     const s = publicSettings();
     try {
       const info = await crm().info();
-      return { ok: true, crm: info, has: s.has };
+      return { ok: true, crm: info, has: s.has, authEnabled };
     } catch (err) {
       return { ok: false, crm: { mode: "ghl", accountName: "" }, has: s.has, error: err instanceof Error ? err.message : String(err) };
     }
@@ -1156,7 +1161,8 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 const port = Number(process.env.PORT ?? 4400);
 app.listen(port, () => {
   const s = getSettings();
-  console.log(`Bloom AI API on http://localhost:${port}`);
+  console.log(`Bloom AI on http://localhost:${port}`);
+  console.log(`  Login: ${authEnabled ? "password required" : hosted ? "LOCKED — set BLOOM_PASSWORD to finish setup" : "off (local use)"}`);
   console.log(`  CRM: ${s.ghlApiKey && s.ghlLocationId ? "GoHighLevel" : "demo workspace (connect GoHighLevel in Settings)"}`);
   console.log(`  Agents indexed: ${allAgents().length}`);
   console.log(`  Meta Ads: ${s.metaAccessToken ? "connected" : "sample data (connect in Settings)"}`);

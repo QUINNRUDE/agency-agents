@@ -30,6 +30,9 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     data = text;
   }
   if (res.ok && method !== "GET" && /\/tasks|\/api\/calls$|\/api\/contacts\/bulk/.test(url)) window.dispatchEvent(new Event(TASKS_CHANGED));
+  if (res.status === 401 && data && typeof data === "object" && "login" in data) {
+    window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+  }
   if (!res.ok) {
     const msg = data && typeof data === "object" && "error" in data ? String((data as { error: unknown }).error) : `Request failed (${res.status})`;
     throw new ApiError(msg, res.status);
@@ -49,6 +52,7 @@ export interface Status {
   ok: boolean;
   crm: { mode: "ghl" | "demo"; accountName: string };
   has: { ghl: boolean; claude: boolean; places: boolean; meta: boolean };
+  authEnabled?: boolean;
   error?: string;
 }
 

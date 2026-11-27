@@ -1,0 +1,21 @@
+# One-click deploy of Bloom AI (apps/bloom-ai) to Render.
+# Render → New → Blueprint → pick this repository and branch. It will ask for BLOOM_PASSWORD.
+services:
+  - type: web
+    name: bloom-ai
+    runtime: docker
+    dockerfilePath: ./apps/bloom-ai/Dockerfile
+    dockerContext: .
+    # Automations must run 24/7, and the disk keeps your settings and history, so this needs a paid
+    # instance (the free plan sleeps and has no disk).
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: bloom-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: BLOOM_PASSWORD
+        sync: false # Render asks you to type this when you create the Blueprint
+      - key: BLOOM_DATA_DIR
+        value: /data

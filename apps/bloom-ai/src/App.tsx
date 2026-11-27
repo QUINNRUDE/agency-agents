@@ -244,6 +244,15 @@ function Shell() {
               <small>{status?.has.meta ? "Leads & spend syncing" : "Connect Meta →"}</small>
             </span>
           </Link>
+          {status?.authEnabled && (
+            <button
+              className="conn"
+              style={{ all: "unset", cursor: "pointer", fontSize: 12.5, color: "var(--side-text-2)" }}
+              onClick={() => void api.post("/api/logout").then(() => (window.location.href = "/login"))}
+            >
+              Log out
+            </button>
+          )}
           <Link to="/settings#claude" className="conn" style={{ textDecoration: "none" }}>
             <span className={`dot ${status?.has.claude ? "on" : ""}`} />
             <span>

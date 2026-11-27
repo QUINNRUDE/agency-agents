@@ -79,6 +79,22 @@ For development: `npm run dev` (UI on :5173, API on :4400).
 
 It starts in a **demo workspace** with a realistic seeded book of business. Automations really run in the demo, but messages are recorded instead of delivered. Use **Inbox → Simulate incoming** to watch the DM and text responders reply.
 
+## Put it online (Render)
+
+Hosting gives Bloom AI its own web address that works on any device, and keeps automations running 24/7. The repository includes a `render.yaml` blueprint, so setup is mostly clicking:
+
+1. Go to **render.com** and sign up with **"Continue with GitHub"**.
+2. In the dashboard, click **New → Blueprint**, connect GitHub if asked, and pick **quinnrude/agency-agents**. Choose the branch that has Bloom AI on it.
+3. Render reads `render.yaml` and asks for **`BLOOM_PASSWORD`**. Type the password you'll use to log in (make it long; this protects your contacts and messaging).
+4. Click **Apply**. The first build takes about 5 minutes.
+5. Open the address Render shows (like `https://bloom-ai-xxxx.onrender.com`), log in, and connect your accounts in **Settings**.
+
+**Cost:** Render's Starter instance (about $7/month) plus a 1 GB disk (about $0.25/month). The free plan isn't enough: it goes to sleep, which would stop your automations, and it has no disk for your settings.
+
+**Security:** when hosted, Bloom AI requires a login and refuses to run without `BLOOM_PASSWORD`. Sessions last 30 days, and login attempts are rate-limited. The GoHighLevel webhook (Automations → Safety & settings) now has a public address you can paste into GHL workflows for instant replies.
+
+Other hosts work too. Build with `docker build -f apps/bloom-ai/Dockerfile .` from the repository root, mount a volume at `/data`, and set `BLOOM_PASSWORD`.
+
 ## Connect your accounts
 
 Use **Settings** in the app, or copy `.env.example` to `.env`. Values in `.env` take precedence.

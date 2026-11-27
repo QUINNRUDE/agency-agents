@@ -477,7 +477,6 @@ async function handleInbound(e: EngineEvent): Promise<"opted_out" | "ok"> {
 
 // ---- Engine loop -------------------------------------------------------------------
 
-let ticking = false;
 let timer: NodeJS.Timeout | null = null;
 let nudgeTimer: NodeJS.Timeout | null = null;
 let pollForced = false;
@@ -500,32 +499,50 @@ export function stopEngine() {
   timer = null;
 }
 
-export async function tick() {
-  if (ticking) return;
+let current: Promise<void> | null = null;
+let again = false;
+
+/**
+ * Runs one engine pass (poll for triggers, then advance due sequences). If a pass is already
+ * running, the caller waits for it and one more pass runs afterwards, so requests made mid-pass
+ * (a new contact, an inbound DM) are never dropped until the next interval.
+ */
+export function tick(): Promise<void> {
+  if (current) {
+    again = true;
+    return current;
+  }
+  current = (async () => {
+    do {
+      again = false;
+      await tickOnce();
+    } while (again);
+  })().finally(() => {
+    current = null;
+  });
+  return current;
+}
+
+async function tickOnce() {
   const d = db.read();
   if (!d.settings.enabled) return;
-  ticking = true;
-  try {
-    const isDemo = !getSettings().ghlApiKey;
-    const every = isDemo ? 10_000 : 45_000;
-    if (pollForced || !d.watch.lastPoll || Date.now() - Date.parse(d.watch.lastPoll) >= every) {
-      pollForced = false;
-      try {
-        await poll();
-        db.update((x) => {
-          x.watch.lastError = "";
-        });
-      } catch (err) {
-        db.update((x) => {
-          x.watch.lastError = err instanceof Error ? err.message : String(err);
-          x.watch.lastPoll = new Date().toISOString();
-        });
-      }
+  const isDemo = !getSettings().ghlApiKey;
+  const every = isDemo ? 10_000 : 45_000;
+  if (pollForced || !d.watch.lastPoll || Date.now() - Date.parse(d.watch.lastPoll) >= every) {
+    pollForced = false;
+    try {
+      await poll();
+      db.update((x) => {
+        x.watch.lastError = "";
+      });
+    } catch (err) {
+      db.update((x) => {
+        x.watch.lastError = err instanceof Error ? err.message : String(err);
+        x.watch.lastPoll = new Date().toISOString();
+      });
     }
-    await processDue();
-  } finally {
-    ticking = false;
   }
+  await processDue();
 }
 
 async function poll() {
