@@ -1,13 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { BrowserRouter, Link, MemoryRouter, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { PREVIEW } from "./preview/shim.ts";
-import { Bot, Building2, CheckSquare, Columns3, Inbox as InboxIcon, LayoutDashboard, Megaphone, Moon, Phone, Search, Settings as SettingsIcon, Sun, Telescope, Users, Workflow } from "lucide-react";
+import { Bot, Building2, CheckSquare, Columns3, Inbox as InboxIcon, Send, LayoutDashboard, Megaphone, Moon, Phone, Search, Settings as SettingsIcon, Sun, Telescope, Users, Workflow } from "lucide-react";
 import { api, TASKS_CHANGED, type Contact, type Playbook, type Status } from "./lib/api.ts";
 import { ToastProvider } from "./components/ui.tsx";
 import { ACCENTS, Logo, Swatch, useAccent } from "./components/brand.tsx";
 import { Inbox } from "./pages/Inbox.tsx";
 import { Automations } from "./pages/Automations.tsx";
 import { Ads } from "./pages/Ads.tsx";
+import { Broadcasts } from "./pages/Broadcasts.tsx";
 import { Overview } from "./pages/Overview.tsx";
 import { Clients } from "./pages/Clients.tsx";
 import { ClientDetail } from "./pages/ClientDetail.tsx";
@@ -35,6 +36,7 @@ const NAV_GROUPS = [
     items: [
       { to: "/inbox", label: "Inbox", icon: InboxIcon },
       { to: "/automations", label: "Automations", icon: Workflow },
+      { to: "/broadcasts", label: "Broadcasts", icon: Send },
       { to: "/calls", label: "Calls", icon: Phone },
     ],
   },
@@ -64,6 +66,7 @@ const TITLES: Record<string, string> = {
   tasks: "Tasks",
   inbox: "Inbox",
   automations: "Automations",
+  broadcasts: "Broadcasts",
   ads: "Meta Ads",
   prospecting: "Find clients",
   calls: "Calls",
@@ -299,6 +302,7 @@ function Shell() {
             <Route path="/inbox/:contactId" element={<Inbox />} />
             <Route path="/automations" element={<Automations />} />
             <Route path="/ads" element={<Ads />} />
+            <Route path="/broadcasts" element={<Broadcasts />} />
             <Route path="/prospecting" element={<Prospecting />} />
             <Route path="/calls" element={<Calls />} />
             <Route path="/calls/:id" element={<CallWorkspace />} />

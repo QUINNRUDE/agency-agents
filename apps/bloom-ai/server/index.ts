@@ -6,6 +6,7 @@ import { agentMeta, allAgents, getAgent } from "./agents.ts";
 import { authEnabled, authMiddleware, hosted, mountAuthRoutes } from "./auth.ts";
 import { generateMessage, PLAYBOOKS, streamAgent, testClaude } from "./ai.ts";
 import * as engine from "./automations.ts";
+import * as broadcasts from "./broadcasts.ts";
 import { metaOverview, MetaError, syncLeads, testMeta, updateCampaign, listForms, type MetaOverview } from "./meta.ts";
 import { getSettings, publicSettings, saveSettings } from "./config.ts";
 import { activeDemo, crm, testGhl } from "./crm/index.ts";
@@ -1097,6 +1098,70 @@ app.post(
       res.status((err as { status?: number }).status ?? 500);
       return { error: err instanceof Error ? err.message : String(err) };
     }
+  }),
+);
+
+// ---- Broadcasts -------------------------------------------------------------------
+
+app.get("/api/broadcasts", route(async () => broadcasts.listBroadcasts()));
+app.get(
+  "/api/broadcasts/:id",
+  route(async (req, res) => {
+    const b = broadcasts.getBroadcast(param(req, "id"));
+    if (!b) {
+      res.status(404);
+      return { error: "Broadcast not found" };
+    }
+    return b;
+  }),
+);
+app.post(
+  "/api/broadcasts/preview",
+  route(async (req) => {
+    const b = req.body ?? {};
+    const channel = b.channel === "Email" ? "Email" : "SMS";
+    const r = await broadcasts.resolveAudience(b.audience ?? { kind: "all" }, channel);
+    const first = r.eligible[0];
+    return {
+      label: r.label,
+      total: r.total,
+      eligible: r.eligible.length,
+      excluded: r.excluded,
+      sample: r.eligible.slice(0, 6).map((c) => c.name),
+      sampleText: first && b.message ? broadcasts.finalText({ channel, message: String(b.message), optOutLine: b.optOutLine !== false }, first) : "",
+      sampleName: first?.name ?? "",
+    };
+  }),
+);
+app.post(
+  "/api/broadcasts",
+  route(async (req, res) => {
+    try {
+      return await broadcasts.createBroadcast(req.body ?? {});
+    } catch (err) {
+      res.status(400);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  }),
+);
+app.post(
+  "/api/broadcasts/test",
+  route(async (req) => broadcasts.sendTest(req.body ?? {})),
+);
+app.post(
+  "/api/broadcasts/:id/:action",
+  route(async (req, res) => {
+    const action = param(req, "action");
+    if (action !== "pause" && action !== "resume" && action !== "cancel") {
+      res.status(404);
+      return { error: "Unknown action" };
+    }
+    const b = broadcasts.setStatus(param(req, "id"), action);
+    if (!b) {
+      res.status(400);
+      return { error: "This broadcast can't be changed any more." };
+    }
+    return { status: b.status };
   }),
 );
 

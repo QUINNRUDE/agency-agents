@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowDown, ArrowUp, Bookmark, Building2, Columns3, Copy, Download, Phone, Plus, Search, Tag, Trash2, Upload, UserRound, Users, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, Building2, Columns3, Copy, Download, Phone, Plus, Search, Send, Tag, Trash2, Upload, UserRound, Users, X } from "lucide-react";
 import { api, type Contact, type Opportunity, type Pipeline, type SavedView, type User } from "../lib/api.ts";
 import { money, phoneDisplay, relTime, shortDate } from "../lib/format.ts";
 import { guessMapping, IMPORT_FIELDS, parseCsv, type ImportKey } from "../lib/csv.ts";
@@ -371,6 +371,7 @@ export function Clients() {
           <button className="btn sm" onClick={() => setModal("untag")}><Tag /> Remove tag</button>
           {users.length > 0 && <button className="btn sm" onClick={() => setModal("assign")}><UserRound /> Assign owner</button>}
           <button className="btn sm" onClick={() => setModal("pipeline")}><Columns3 /> Add to pipeline</button>
+          <button className="btn sm" onClick={() => nav("/broadcasts", { state: { contactIds: [...selected] } })}><Send /> Broadcast</button>
           <button className="btn sm" onClick={() => exportCsv(rows.filter((r) => selected.has(r.id)))}><Download /> Export</button>
           <button className="btn sm danger" onClick={() => setModal("delete")}><Trash2 /> Delete</button>
         </div>

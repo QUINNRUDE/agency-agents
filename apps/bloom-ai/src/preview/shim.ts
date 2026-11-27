@@ -18,6 +18,59 @@ interface Snapshot {
 
 const NOT_SAVED = "This is a preview with demo data, so changes aren't saved and nothing is sent. Run or host Bloom AI to use it for real.";
 
+const OPTED_OUT = ["opted-out", "dnd", "do-not-contact"];
+const COLD = ["prospect", "cold-list"];
+const CONSENT = ["sms-ok", "sms-consent", "opted-in"];
+
+/** Same audience + eligibility rules as the server, computed from the snapshot. */
+function previewBroadcast(d: Snapshot, b: Json) {
+  const channel = b.channel === "Email" ? "Email" : "SMS";
+  const a = (b.audience ?? { kind: "all" }) as Json;
+  const tagsOf = (c: Json) => ((c.tags as string[]) ?? []).map((t) => t.toLowerCase());
+  const won = new Set(d.opportunities.filter((o) => o.status === "won").map((o) => String(o.contactId)));
+  let picked = d.contacts;
+  let label = "Everyone";
+  if (a.kind === "customers") (picked = d.contacts.filter((c) => won.has(String(c.id)))), (label = "Customers (won a deal)");
+  else if (a.kind === "tag") (picked = d.contacts.filter((c) => tagsOf(c).includes(String(a.tag).toLowerCase()))), (label = `Tag “${a.tag}”`);
+  else if (a.kind === "stage") {
+    const ids = new Set(d.opportunities.filter((o) => o.stageId === a.stageId && o.status === "open").map((o) => String(o.contactId)));
+    picked = d.contacts.filter((c) => ids.has(String(c.id)));
+    label = "Pipeline stage";
+  } else if (a.kind === "contacts") {
+    const ids = new Set(((a.contactIds as unknown[]) ?? []).map(String));
+    picked = d.contacts.filter((c) => ids.has(String(c.id)));
+    label = `${ids.size} selected contacts`;
+  }
+  const excluded: Record<string, number> = {};
+  const eligible = picked.filter((c) => {
+    const t = tagsOf(c);
+    const why = c.dnd || t.some((x) => OPTED_OUT.includes(x))
+      ? "Opted out / DND"
+      : channel === "SMS" && !c.phone
+        ? "No phone number"
+        : channel === "Email" && !c.email
+          ? "No email address"
+          : channel === "SMS" && t.some((x) => COLD.includes(x)) && !t.some((x) => CONSENT.includes(x))
+            ? "Cold prospect (no permission to text)"
+            : null;
+    if (why) excluded[why] = (excluded[why] ?? 0) + 1;
+    return !why;
+  });
+  const first = eligible[0];
+  const fill = (s: string, c: Json) =>
+    s
+      .replace(/\{\{\s*first_name\s*\}\}/g, String(c.firstName || String(c.name ?? "").split(" ")[0] || "there"))
+      .replace(/\{\{\s*company\s*\}\}/g, String(c.companyName ?? ""))
+      .replace(/\{\{\s*city\s*\}\}/g, String(c.city ?? ""))
+      .replace(/\{\{\s*my_name\s*\}\}/g, "the team")
+      .replace(/\{\{\s*agency\s*\}\}/g, "our office")
+      .replace(/\{\{\s*\w+\s*\}\}/g, "")
+      .trim();
+  let sampleText = first && b.message ? fill(String(b.message), first) : "";
+  if (sampleText && channel === "SMS" && b.optOutLine !== false && !/\bstop\b/i.test(sampleText)) sampleText += "\nReply STOP to opt out.";
+  return { label, total: picked.length, eligible: eligible.length, excluded, sample: eligible.slice(0, 6).map((c) => c.name), sampleText, sampleName: first?.name ?? "" };
+}
+
 let snapshot: Promise<Snapshot> | null = null;
 const load = () => (snapshot ??= fetch("./preview-data.json").then((r) => r.json() as Promise<Snapshot>));
 
@@ -28,6 +81,7 @@ async function handle(url: URL, method: string, body: unknown): Promise<Response
   const p = url.pathname;
   const q = url.searchParams;
   if (method !== "GET") {
+    if (p === "/api/broadcasts/preview") return json(previewBroadcast(d, (body ?? {}) as Json));
     if (p === "/api/prospects/search") {
       const niche = String((body as Json)?.niche ?? "").trim().toLowerCase();
       const hit = d.prospectSearches[niche];

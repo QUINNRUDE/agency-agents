@@ -218,6 +218,60 @@ try {
     assert.match(r.error, /24 hours/);
   });
 
+  const waitDone = async (id: string) => {
+    for (let i = 0; i < 40; i++) {
+      const b = await j("GET", `/api/broadcasts/${id}`);
+      if (b.status === "done" || b.status === "cancelled") return b;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    throw new Error("broadcast did not finish");
+  };
+
+  await test("broadcast preview leaves out opted-out contacts and cold prospects", async () => {
+    const p = await j("POST", "/api/broadcasts/preview", { audience: { kind: "all" }, channel: "SMS", message: "Hi {{first_name}}, we have openings next week!" });
+    assert.ok(p.eligible > 0);
+    assert.ok(p.excluded["Opted out / DND"] >= 1);
+    assert.ok(p.excluded["Cold prospect (no permission to text)"] >= 1);
+    assert.match(p.sampleText, /Reply STOP to opt out\.$/);
+  });
+
+  await test("an SMS broadcast reaches eligible contacts only, with the opt-out line", async () => {
+    const before = calls.filter((c) => c.path === "/conversations/messages").length;
+    const b = await j("POST", "/api/broadcasts", { name: "Openings", channel: "SMS", message: "Hi {{first_name}}, we have openings next week!", audience: { kind: "all" }, perMinute: 120 });
+    const done = await waitDone(b.id);
+    const sentNow = calls.filter((c) => c.path === "/conversations/messages").slice(before).map((c) => c.body as { contactId: string; message: string; type: string });
+    assert.equal(done.status, "done");
+    assert.equal(sentNow.length, done.recipients.filter((r: { status: string }) => r.status === "sent").length);
+    assert.ok(sentNow.length >= 1);
+    assert.ok(sentNow.every((m) => m.type === "SMS" && /Reply STOP to opt out\.$/.test(m.message)));
+    assert.ok(!sentNow.some((m) => m.contactId === "g1")); // opted out earlier with STOP
+    const contacts = await j("GET", "/api/contacts");
+    const cold = contacts.filter((c: { tags: string[] }) => c.tags.includes("prospect") && !c.tags.includes("sms-ok")).map((c: { id: string }) => c.id);
+    assert.ok(cold.length >= 1);
+    assert.ok(!sentNow.some((m) => cold.includes(m.contactId)));
+  });
+
+  await test("broadcasts respect test mode", async () => {
+    await j("PUT", "/api/automation-settings", { dryRun: true });
+    const before = calls.filter((c) => c.path === "/conversations/messages").length;
+    const b = await j("POST", "/api/broadcasts", { channel: "SMS", message: "Test {{first_name}}", audience: { kind: "all" }, perMinute: 120 });
+    const done = await waitDone(b.id);
+    assert.ok(done.recipients.every((r: { status: string }) => r.status === "test_mode"));
+    assert.equal(calls.filter((c) => c.path === "/conversations/messages").length, before);
+    await j("PUT", "/api/automation-settings", { dryRun: false });
+  });
+
+  await test("a scheduled broadcast can be cancelled before it sends", async () => {
+    const before = calls.filter((c) => c.path === "/conversations/messages").length;
+    const b = await j("POST", "/api/broadcasts", { channel: "SMS", message: "Later {{first_name}}", audience: { kind: "all" }, scheduledAt: new Date(Date.now() + 3600e3).toISOString() });
+    assert.equal(b.status, "scheduled");
+    await j("POST", `/api/broadcasts/${b.id}/cancel`);
+    const after = await j("GET", `/api/broadcasts/${b.id}`);
+    assert.equal(after.status, "cancelled");
+    assert.ok(after.recipients.every((r: { status: string }) => r.status === "skipped"));
+    assert.equal(calls.filter((c) => c.path === "/conversations/messages").length, before);
+  });
+
   console.log(`\n${ok} passed`);
 } finally {
   server.kill();

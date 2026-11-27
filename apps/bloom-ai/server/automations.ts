@@ -146,14 +146,14 @@ const db = {
 };
 
 const OPT_OUT = /^\s*(stop|stopall|stop all|unsubscribe|cancel|end|quit|opt[\s-]?out|remove me)\b/i;
-const OPTED_OUT_TAGS = ["opted-out", "dnd", "do-not-contact"];
+export const OPTED_OUT_TAGS = ["opted-out", "dnd", "do-not-contact"];
 // Cold prospects (found with Find clients or imported as a cold list) never gave permission to be texted.
 const PROSPECT_TAGS = ["prospect", "cold-list"];
 // Any of these, or the contact messaging you first, counts as permission to text.
 const CONSENT_TAGS = ["sms-ok", "sms-consent", "opted-in"];
 
 /** A cold prospect with no permission to receive automated texts yet. */
-function noTextConsent(c: Contact): boolean {
+export function noTextConsent(c: Contact): boolean {
   const tags = c.tags.map((t) => t.toLowerCase());
   if (!tags.some((t) => PROSPECT_TAGS.includes(t))) return false;
   if (tags.some((t) => CONSENT_TAGS.includes(t))) return false;
@@ -730,7 +730,7 @@ async function advance(runId: string) {
   }
 }
 
-function inQuietHours(s: EngineSettings, at = new Date()): boolean {
+export function inQuietHours(s: EngineSettings, at = new Date()): boolean {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: s.timezone || "UTC", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at);
   const hh = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
   const mm = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
@@ -743,7 +743,7 @@ function inQuietHours(s: EngineSettings, at = new Date()): boolean {
   return start <= endM ? t < start || t >= endM : t < start && t >= endM;
 }
 
-function nextWindowOpen(s: EngineSettings): Date {
+export function nextWindowOpen(s: EngineSettings): Date {
   const t = new Date();
   for (let i = 0; i < 4 * 48; i++) {
     t.setTime(t.getTime() + 15 * 60_000);
