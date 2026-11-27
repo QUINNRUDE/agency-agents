@@ -16,6 +16,12 @@
 
 ---
 
+> ### 🧭 Clientline — a client command center powered by these agents
+>
+> [`apps/clientline`](apps/clientline) is a working dashboard that finds, tracks and manages clients, runs your calls, and puts every agent here to work on real client data. It connects to GoHighLevel. → [Read more](apps/clientline/README.md)
+
+---
+
 ## 🚀 What Is This?
 
 Born from a Reddit thread and months of iteration, **The Agency** is a growing collection of meticulously crafted AI agent personalities. Each agent is:
