@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { CheckCircle2, Coins, ExternalLink, Globe, Loader2, Mail, MapPin, Phone, Plus, ScanSearch, Search, Share2, Sparkles, Star, Telescope, X, XCircle, AlertTriangle } from "lucide-react";
+import { CheckCircle2, Coins, Download, ExternalLink, Globe, Loader2, Mail, MapPin, Phone, Plus, ScanSearch, Search, Share2, Sparkles, Star, Telescope, X, XCircle, AlertTriangle } from "lucide-react";
 import { api, type LeadJob, type Pipeline, type Prospect } from "../lib/api.ts";
 import { phoneDisplay, relTime } from "../lib/format.ts";
 import { AiPanel } from "../components/AiPanel.tsx";
@@ -25,6 +25,51 @@ interface Usage {
 }
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
+const AREA_KEY = "bloom-lead-area";
+const RADIUS_KEY = "bloom-lead-radius";
+const remembered = (k: string) => {
+  try {
+    return localStorage.getItem(k) ?? "";
+  } catch {
+    return "";
+  }
+};
+const remember = (k: string, v: string) => {
+  try {
+    localStorage.setItem(k, v);
+  } catch {
+    /* private mode: just not remembered */
+  }
+};
+
+/** A spreadsheet of everything needed to contact these businesses. */
+function downloadCsv(rows: Prospect[], name: string) {
+  const cols: [string, (p: Prospect) => string][] = [
+    ["Business", (p) => p.name],
+    ["Phone", (p) => p.phone],
+    ["Email", (p) => p.email ?? ""],
+    ["Website", (p) => p.website],
+    ["Address", (p) => p.address],
+    ["City", (p) => p.city],
+    ["Category", (p) => p.category],
+    ["Rating", (p) => (p.rating === null ? "" : String(p.rating))],
+    ["Reviews", (p) => (p.rating === null ? "" : String(p.reviews))],
+    ["Social", (p) => (p.socials ?? []).join(" ")],
+    ["Score", (p) => String(p.score)],
+    ["Why", (p) => p.signals.join("; ")],
+    ["Listing", (p) => p.mapsUrl],
+  ];
+  const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const csv = [cols.map(([h]) => h).join(","), ...rows.map((p) => cols.map(([, f]) => cell(f(p) ?? "")).join(","))].join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${name.replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "leads"}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 const isRunning = (j: LeadJob | null) => j?.status === "scraping" || j?.status === "finding-contacts";
 
 export function Prospecting() {
@@ -40,10 +85,20 @@ export function Prospecting() {
   const usage = useAsync(() => (apifyConnected ? api.get<Usage>("/api/lead-finder/usage") : Promise.resolve<Usage>({ connected: false, pricePerLead: 0.004 })), [apifyConnected]);
   const [job, setJob] = useState<LeadJob | null>(null);
   const [niche, setNiche] = useState("");
-  const [location, setLocation] = useState("");
+  const [location, setLocation] = useState(() => remembered(AREA_KEY));
+  const [radius, setRadius] = useState(() => Number(remembered(RADIUS_KEY) || 25));
   const [max, setMax] = useState(100);
   const [minRating, setMinRating] = useState(0);
   const [noSite, setNoSite] = useState(false);
+  const [reachable, setReachable] = useState(false);
+  // Start from the area saved in Settings → Business profile if nothing was searched on this device yet.
+  useEffect(() => {
+    if (location) return;
+    api
+      .get<{ profile?: { area?: string } }>("/api/settings")
+      .then((s) => s.profile?.area && setLocation((l) => l || s.profile?.area || ""))
+      .catch(() => undefined);
+  }, []);
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<Prospect[] | null>(null);
   const [sample, setSample] = useState(false);
@@ -108,13 +163,15 @@ export function Prospecting() {
     setSearching(true);
     setView("results");
     setSelected(new Set());
+    remember(AREA_KEY, location.trim());
+    remember(RADIUS_KEY, String(radius));
     try {
-      const r = await api.post<{ prospects: Prospect[]; sample: boolean; job?: LeadJob }>("/api/prospects/search", { source, niche, location, maxResults: max, minRating: minRating || undefined, onlyNoWebsite: noSite });
+      const r = await api.post<{ prospects: Prospect[]; sample: boolean; job?: LeadJob }>("/api/prospects/search", { source, niche, location, radiusMiles: source === "free" ? radius : undefined, maxResults: max, minRating: minRating || undefined, onlyNoWebsite: noSite });
       setResults(r.prospects);
       setSample(r.sample);
       if (r.job) setJob(r.job);
       if (r.prospects.length) saved.reload();
-      if (source === "free" && !r.prospects.length) toast("OpenStreetMap has no listings for that here. Try a nearby city, different wording, or Google Maps via Apify.", "bad");
+      if (source === "free" && !r.prospects.length) toast(`OpenStreetMap has no listings for that${radius < 50 ? `. Try a wider area (+${radius ? 50 : 25} miles)` : ""}, different wording, or Google Maps via Apify.`, "bad");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Search failed", "bad");
     } finally {
@@ -155,9 +212,11 @@ export function Prospecting() {
 
   const rows = useMemo(() => {
     // Rating and "no website" filters apply to the latest search here (Apify searches return everything).
-    const list = view === "results" ? (results ?? []).filter((p) => (!minRating || p.rating === null || p.rating >= minRating) && (!noSite || !p.website)) : (saved.data ?? []);
+    const list = (view === "results" ? (results ?? []).filter((p) => (!minRating || p.rating === null || p.rating >= minRating) && (!noSite || !p.website)) : (saved.data ?? [])).filter(
+      (p) => !reachable || p.phone || p.email,
+    );
     return [...list].sort((a, b) => Number(a.status === "dismissed") - Number(b.status === "dismissed") || b.score - a.score);
-  }, [view, results, saved.data, minRating, noSite]);
+  }, [view, results, saved.data, minRating, noSite, reachable]);
   const u = usage.data;
   const estimate = max * (u?.pricePerLead ?? 0.004);
 
@@ -205,10 +264,22 @@ export function Prospecting() {
               </Field>
             </div>
             <div style={{ flex: "1 1 220px" }}>
-              <Field label="Location">
+              <Field label="Your area">
                 <input className="input" placeholder="City, state or ZIP" value={location} onChange={(e) => setLocation(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} />
               </Field>
             </div>
+            {source === "free" && (
+              <div style={{ width: 150 }}>
+                <Field label="Search radius">
+                  <select className="select" value={radius} onChange={(e) => setRadius(Number(e.target.value))}>
+                    <option value={0}>Just this city</option>
+                    <option value={10}>+10 miles</option>
+                    <option value={25}>+25 miles</option>
+                    <option value={50}>+50 miles</option>
+                  </select>
+                </Field>
+              </div>
+            )}
             <div style={{ width: 110 }}>
               <Field label="Max results">
                 <select className="select" value={max} onChange={(e) => setMax(Number(e.target.value))}>
@@ -278,7 +349,22 @@ export function Prospecting() {
           <button className={`btn ${view === "results" ? "on" : ""}`} onClick={() => setView("results")}>Latest search <span className="faint num" style={{ marginLeft: 4 }}>{counts.results}</span></button>
           <button className={`btn ${view === "saved" ? "on" : ""}`} onClick={() => setView("saved")}>All prospects <span className="faint num" style={{ marginLeft: 4 }}>{counts.saved}</span></button>
         </div>
+        <label className="row small" style={{ gap: 6 }}>
+          <input type="checkbox" checked={reachable} onChange={(e) => setReachable(e.target.checked)} /> Only with a phone or email
+        </label>
         <span className="spacer" />
+        {rows.length > 0 && (
+          <button
+            className="btn sm"
+            onClick={() => {
+              const pick = selected.size ? rows.filter((r) => selected.has(r.id)) : rows;
+              downloadCsv(pick, `${niche || "leads"} ${location || ""}`);
+              toast(`Downloaded ${pick.length} lead${pick.length === 1 ? "" : "s"}`);
+            }}
+          >
+            <Download /> {selected.size ? `Download ${selected.size}` : "Download list"}
+          </button>
+        )}
         {selected.size > 0 && (
           <>
             <span className="small muted">{selected.size} selected</span>
@@ -325,9 +411,9 @@ export function Prospecting() {
                       {p.rating !== null ? <><Star size={11} style={{ verticalAlign: -1 }} /> {p.rating.toFixed(1)} <span className="faint">({p.reviews})</span></> : <span className="faint">{p.source === "osm" ? "Not listed" : "No reviews"}</span>}
                     </td>
                     <td>{p.website ? <span className="badge">{p.audit ? (p.audit.ok ? "Audited" : "Down") : "Has site"}</span> : <span className="badge bad">None</span>}</td>
-                    <td className="small" style={{ whiteSpace: "nowrap" }}>
-                      {p.phone ? <div className="num">{phoneDisplay(p.phone)}</div> : <span className="faint">—</span>}
-                      {p.email && <div className="faint ellipsis" style={{ maxWidth: 220 }} title={p.email}><Mail size={11} style={{ verticalAlign: -1 }} /> {p.email}</div>}
+                    <td className="small" style={{ whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()}>
+                      {p.phone ? <a className="num contact-link" href={`tel:${p.phone}`} title={`Call ${p.name}`}><Phone size={11} /> {phoneDisplay(p.phone)}</a> : <span className="faint">—</span>}
+                      {p.email && <a className="contact-link ellipsis" style={{ maxWidth: 220 }} href={`mailto:${p.email}`} title={`Email ${p.name}`}><Mail size={11} /> {p.email}</a>}
                     </td>
                     <td style={{ maxWidth: 280 }}>
                       <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>

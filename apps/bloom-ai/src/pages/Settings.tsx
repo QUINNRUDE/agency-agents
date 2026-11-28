@@ -41,6 +41,7 @@ const PROFILE_FIELDS: [string, string, string][] = [
   ["priceRange", "Pricing", "$1,500–$3,500/mo retainer + ad spend, month-to-month"],
   ["differentiators", "Why you", "Pay-per-booked-appointment guarantee in month one; reporting in plain English"],
   ["bookingLink", "Booking link", "https://link.yourdomain.com/widget/booking/…"],
+  ["area", "Your area (where you find clients)", "Austin, TX"],
 ];
 
 type TestResult = { ok: boolean; message: string } | null;

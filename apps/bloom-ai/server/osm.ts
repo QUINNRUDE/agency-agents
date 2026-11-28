@@ -67,6 +67,8 @@ export interface Area {
   city: string;
   /** south, west, north, east */
   bbox: [number, number, number, number];
+  lat: number;
+  lon: number;
 }
 
 const geoCache = new Map<string, Area>();
@@ -94,9 +96,16 @@ export async function geocode(location: string): Promise<Area> {
   if (n - s > MAX * 2) [s, n] = [lat - MAX, lat + MAX];
   if (e - w > MAX * 2) [w, e] = [lon - MAX, lon + MAX];
   const a = r.address ?? {};
-  const area: Area = { name: r.display_name ?? location, city: a.city ?? a.town ?? a.village ?? r.name ?? "", bbox: [s, w, n, e] };
+  const area: Area = { name: r.display_name ?? location, city: a.city ?? a.town ?? a.village ?? r.name ?? "", bbox: [s, w, n, e], lat, lon };
   geoCache.set(key, area);
   return area;
+}
+
+/** A box reaching `miles` out from the area's center in every direction (your city and the towns around it). */
+export function radiusBox(area: Area, miles: number): Area["bbox"] {
+  const dLat = miles / 69;
+  const dLon = miles / (69 * Math.cos((area.lat * Math.PI) / 180));
+  return [area.lat - dLat, area.lon - dLon, area.lat + dLat, area.lon + dLon];
 }
 
 export function overpassQuery(q: { tags: string[]; name: string }, bbox: Area["bbox"], limit: number): string {
@@ -185,14 +194,15 @@ export function elementToProspect(el: Element, search: string, niche: string, ar
 }
 
 /** Searches OpenStreetMap for a type of business in an area. Free, no key. */
-export async function searchOsm(input: { niche?: unknown; location?: unknown; max?: unknown }): Promise<{ prospects: Prospect[]; area: string }> {
+export async function searchOsm(input: { niche?: unknown; location?: unknown; max?: unknown; radiusMiles?: unknown }): Promise<{ prospects: Prospect[]; area: string }> {
   const niche = String(input.niche ?? "").trim().slice(0, 80);
   const location = String(input.location ?? "").trim().slice(0, 120);
   if (!niche || !location) throw new CrmError("Enter a type of business and a city or area.", 400);
   const max = Math.min(300, Math.max(10, Math.round(Number(input.max) || 100)));
+  const miles = Math.min(50, Math.max(0, Number(input.radiusMiles) || 0));
   const q = nicheQuery(niche);
   const area = await geocode(location);
-  const elements = await overpass(overpassQuery(q, area.bbox, max));
+  const elements = await overpass(overpassQuery(q, miles ? radiusBox(area, miles) : area.bbox, max));
   const search = `${niche} in ${location}`;
   const seen = new Set<string>();
   const out: Prospect[] = [];

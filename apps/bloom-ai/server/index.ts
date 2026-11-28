@@ -732,7 +732,7 @@ app.post(
     const s = getSettings();
     // Free: OpenStreetMap, no key. Its leads' websites are then checked for emails in the background.
     if (b.source === "free") {
-      const { prospects, area } = await searchOsm({ niche: b.niche, location: b.location, max: b.maxResults });
+      const { prospects, area } = await searchOsm({ niche: b.niche, location: b.location, max: b.maxResults, radiusMiles: b.radiusMiles });
       const merged = mergeProspects(prospects);
       const job = startContactScan(merged, String(b.niche ?? ""), String(b.location ?? ""));
       return { prospects: merged, sample: false, source: "osm", area, ...(job ? { job } : {}) };

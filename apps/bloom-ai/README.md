@@ -14,7 +14,7 @@ Bloom AI is a client command center built on the Agency Agents roster. It finds 
 | **Meta Ads** | **Create and launch lead-ad campaigns** for your own business or a client's: audience, image, AI-written copy, lead form and budget on one page. Spend, leads, cost per lead, CTR and CPM with daily charts. **What the ads actually made**: Meta leads in the CRM, customers won, revenue, ROAS and cost per customer. Pause or turn on campaigns and edit daily budgets inline. Lead Ads sync into the CRM, and an AI ad review |
 | **Clients (CRM)** | People and Companies views, smart and saved views, filters, bulk actions, CSV import, a duplicate finder, owners and custom fields |
 | **Pipeline · Tasks · Calls** | Drag-and-drop deals (with confetti when one is won), an account-wide task list, and a ranked call queue with a live call workspace |
-| **Find clients** | A built-in free scraper (OpenStreetMap: no key, no account, no limit), Google Maps through Apify (about 1,250 leads a month on Apify's Free plan), or Google Places. A free email, phone and social-link finder on each lead's website, opportunity scoring, website audits, and one-click import into your CRM |
+| **Find clients** | A built-in free scraper (OpenStreetMap: no key, no account, no limit) that searches your area plus a radius (10, 25 or 50 miles), Google Maps through Apify (about 1,250 leads a month on Apify's Free plan), or Google Places. A free email, phone and social-link finder on each lead's website, tap-to-call and tap-to-email, a downloadable contact list (CSV), opportunity scoring, website audits, and one-click import into your CRM |
 | **AI Agents** | All 283 agents in this repo, available to chat with or wired into playbooks, with a client's CRM history attached |
 
 Pick from five colour themes (Rose, Violet, Ocean, Sunset, Forest) in the sidebar. Dark mode follows your system or the top-bar toggle.
@@ -133,7 +133,7 @@ API keys, call logs, prospects, synced Meta leads and automation history are sto
 ## Tests
 
 ```bash
-npm test            # GoHighLevel CRM (24) + Meta Ads, campaign builder, automations & broadcasts (27) + demo-data removal (4) + lead finder (8), against mock APIs
+npm test            # GoHighLevel CRM (24) + Meta Ads, campaign builder, automations & broadcasts (27) + demo-data removal (4) + lead finder (9), against mock APIs
 npm run typecheck
 ```
 

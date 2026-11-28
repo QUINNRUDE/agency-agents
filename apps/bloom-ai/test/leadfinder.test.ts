@@ -187,6 +187,14 @@ try {
     assert.equal(job.job.emailsFound, 2);
   });
 
+  await test("the free scraper can search your whole area: the city plus a radius around it", async () => {
+    await j("POST", "/api/prospects/search", { source: "free", niche: "roofers", location: "Austin, TX", radiusMiles: 25 });
+    const dLat = 25 / 69;
+    const dLon = 25 / (69 * Math.cos((30.2649 * Math.PI) / 180));
+    const box = [30.2649 - dLat, -97.7474 - dLon, 30.2649 + dLat, -97.7474 + dLon].map((x) => x.toFixed(4)).join(",");
+    assert.ok(overpassQueries.at(-1)?.includes(`(${box});`), `expected the 25-mile box ${box}`);
+  });
+
   await test("the free scraper explains a place it can't find", async () => {
     const r = await j("POST", "/api/prospects/search", { source: "free", niche: "roofers", location: "Nowhere, ZZ" });
     assert.equal(r._status, 400);

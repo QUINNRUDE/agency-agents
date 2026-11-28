@@ -128,6 +128,7 @@ function profileBlock(p: BusinessProfile): string {
     ["Price range", p.priceRange],
     ["Differentiators", p.differentiators],
     ["Booking link", p.bookingLink],
+    ["Area I serve", p.area],
   ].filter(([, v]) => v);
   return rows.length ? rows.map(([k, v]) => `- ${k}: ${v}`).join("\n") : "- (No business profile set yet — keep recommendations general and tell me what to fill in under Settings → Business profile.)";
 }

@@ -18,6 +18,7 @@ export interface BusinessProfile {
   priceRange: string;
   differentiators: string;
   bookingLink: string;
+  area: string; // where you look for clients, e.g. "Austin, TX" (Find clients starts here)
 }
 
 export interface Settings {
@@ -59,6 +60,7 @@ const defaults: Settings = {
     priceRange: "",
     differentiators: "",
     bookingLink: "",
+    area: "",
   },
 };
 
